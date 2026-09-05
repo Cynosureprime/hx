@@ -54,9 +54,8 @@ The `.ps` and `.pdf` are not committed. If you only want the document, take a
 published PDF rather than building one:
 
 * **[Releases](https://github.com/Cynosureprime/hx/releases)** -- each release is
-  tagged with the document revision, so the PDF there is pinned to the exact
-  source it was made from, including the Appendix A revision stated in the
-  release notes.
+  tagged with the document revision, and the release names the commit the PDF
+  was built from, so a copy can be matched to its exact source.
 * <https://www.mdxfind.com/hx.pdf> -- always the current one.
 
 Neither is byte-reproducible by `make`, for the front-matter reason above.
