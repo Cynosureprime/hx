@@ -50,8 +50,16 @@ do it, so `make` produces the document's content and stops there.
 
 ## Reading it another way
 
-The `.ps` and `.pdf` are generated and are not committed. If you only want the
-document, take the published PDF rather than building it.
+The `.ps` and `.pdf` are not committed. If you only want the document, take a
+published PDF rather than building one:
+
+* **[Releases](https://github.com/Cynosureprime/hx/releases)** -- each release is
+  tagged with the document revision, so the PDF there is pinned to the exact
+  source it was made from, including the Appendix A revision stated in the
+  release notes.
+* <https://www.mdxfind.com/hx.pdf> -- always the current one.
+
+Neither is byte-reproducible by `make`, for the front-matter reason above.
 
 For a plain-text Appendix A — which is what a tool wants — `pdftotext` on the
 built PDF works, and so does reading `hx.8` directly: its table rows are
