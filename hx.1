@@ -11,7 +11,7 @@
 .ds HF 3 3 2 2 2 2 2
 .ds HP 16 14 12 12 12 12 12
 .nr Ej 1
-.PH "'hx Language'$Revision: 1.16 $'Specification'"
+.PH "'hx Language'$Revision: 1.17 $'Specification'"
 .PF "'Introduction' \\\\nP'Waffle'"
 .H 1 "Introduction"
 .P
@@ -2719,6 +2719,26 @@ mean?\(rq the answer is the hx expression
 sha1(md5(pass) . salt)
 .ft R
 \(em not a paragraph of English prose.
+.P
+The expression states what the algorithm
+.I computes .
+Which of the values in that computation a given tool can
+.I present
+for matching is a separate question, settled by how that tool
+compares.
+.B mdxfind
+converts a loaded hash to binary, so two renderings of the same
+digest that differ only in hex case are the same bytes to it and
+cannot be told apart; a type whose only distinguishing feature is
+that case therefore has no comparable value at
+.B x01 ,
+and the first depth mdxfind can present is one hash further on.
+.B hashpipe
+compares the stored text and can distinguish the two, so it
+reports the same type at
+.B x01 .
+Neither is wrong, and the catalog entry is unaffected: each tool
+reports the first value its own comparison can distinguish.
 .H 2 "Catalog Stewardship"
 .P
 A single shared catalog binds the mdxfind family of tools
