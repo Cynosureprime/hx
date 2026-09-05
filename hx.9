@@ -1,0 +1,39 @@
+.\" BEGIN MAIN YEAR 2000 FIXES 1.06
+.\" figure out fully qualified year as YR, in case we need it
+.\" coerce yr to last two digits of year (in range 00-99) for backwards
+.\" compatibility and documentation conformance
+.\" bump for version
+.ie \n(yr<100 \{
+.ie \n(yr>=69 .nr YR \n(yr+1900
+.el \{
+.nr YR \n(yr+2000
+.af yr 01 \} \}
+.el \{
+.ie \n(yr<=138 .nr YR \n(yr+1900
+.el .nr YR \n(yr
+.nr yr \n(yr%100
+.af yr 01 \}
+.PH
+.TC 4 1 2 0
+.SK
+.PF
+.rs
+.sp 2i
+.ns
+.S 20
+.B
+.ad r
+hx
+.sp 10p
+Hash Expression Language
+.sp 10p
+Specification
+.S
+.R
+.sp 2i
+.ad l
+.S 14
+Waffle
+.sp 5p
+August 2026
+.S

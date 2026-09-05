@@ -1,0 +1,2970 @@
+.de SU
+\\$1\s-2\v'-3p'\\$2\v'3p'\s0\\$3
+..
+.\" Keep  headings with their first paragraph - require 6 lines minimum
+.de HY
+.ne 6
+..
+.nr Cl 4
+.nr Hs 2
+.nr Hb 3
+.ds HF 3 3 2 2 2 2 2
+.ds HP 16 14 12 12 12 12 12
+.nr Ej 1
+.PH "'hx Language'$Revision: 1.15 $'Specification'"
+.PF "'Introduction' \\\\nP'Waffle'"
+.H 1 "Introduction"
+.P
+.B hx
+is a domain-specific language for describing, computing, and
+verifying cryptographic hash compositions.
+It provides a precise, human-readable notation for expressing
+the exact sequence of operations that produce a hash value
+from an input password, salt, and optional additional parameters.
+.P
+The language was designed to satisfy three requirements that
+emerged from over a decade of work with mdxfind, hashpipe,
+and the broader password security research community:
+.AL
+.LI
+.B "Reproducibility" \(em
+every hash result that mdxfind reports must be independently
+verifiable.
+If mdxfind matches a truncated SHA-512 digest against a
+32-character hex string, the hx expression
+.ft CW
+cut(sha512(pass), 0, 32)
+.ft R
+describes exactly what was computed.
+Given the same password, evaluating that expression must produce
+the identical 32-character string.
+.LI
+.B "Generality" \(em
+the notation must be capable of expressing every hash type
+that mdxfind supports (approximately 1000 types as of 2026),
+as well as compositions that have not yet been assigned type
+numbers.
+A user encountering a novel hash scheme should be able to
+describe it in hx without waiting for a new type to be added
+to mdxfind.
+.LI
+.B "Clarity" \(em
+the notation must be readable by humans who are not
+cryptographers.
+The expression
+.ft CW
+sha1(md5(pass) . salt)
+.ft R
+should be immediately understandable as
+\(lqcompute the MD5 of the password, concatenate the salt,
+then compute the SHA-1 of the result.\(rq
+.LE
+.P
+hx is not a general-purpose programming language.
+It is deliberately constrained to operations relevant to
+hash computation: cryptographic hash functions, string
+concatenation, encoding transformations, iteration, and
+simple control flow.
+It is an interpreted language, and makes no attempt to
+compete with mdxfind or hashcat in raw throughput.
+Its value lies in correctness, expressiveness, and the
+ability to serve as a canonical reference notation for
+hash computations.
+.H 2 "Scope and Boundaries"
+.P
+hx is designed to express
+.I "compositions of cryptographic hash primitives"
+\(em algorithms built by chaining, concatenating, iterating,
+and encoding the outputs of hash functions.
+This covers the vast majority of password hashing schemes
+encountered in practice: simple hashes, salted hashes,
+iterated hashes, compound multi-algorithm chains, and
+HMAC (Hash-based Message Authentication Code) constructions.
+.P
+.B "Key derivation functions"
+(KDFs) such as bcrypt, scrypt, yescrypt, Argon2, and PBKDF2
+lie outside the expressive scope of hx's composition model.
+These algorithms have internal state machines (Blowfish
+key schedule expansion, memory-hard sequential access
+patterns, configurable parallelism) that cannot be decomposed
+into a sequence of hash-function calls.
+They are registered in hx as
+.I "opaque built-in functions"
+\(em callable by name
+.RB ( bcrypt() ,
+.BR scrypt() ,
+.BR pbkdf2_sha256() )
+but not expressible as hx programs.
+The appendix identifies these types and notes their
+built-in status.
+.P
+This is a deliberate design boundary, not a gap.
+A language that attempted to express bcrypt's internal
+Blowfish rounds or scrypt's memory-access pattern would
+require general-purpose byte manipulation, bitwise
+operations, and array indexing, defeating the simplicity
+and readability that are hx's primary design goals.
+The practical consequence is small: KDFs are a closed set
+of well-known algorithms, each with a standardized
+specification and mature implementations.
+Expressing their internals as hx programs would add
+complexity without adding insight.
+.P
+hx operates on
+.BR "raw bytes" .
+The
+.B pass
+variable contains exactly the byte sequence provided
+on the command line or read from standard input,
+with no character encoding conversion and no Unicode
+normalization applied.
+When a hash scheme requires a specific encoding
+(e.g., UTF-16LE for NTLM), the encoding must be
+expressed explicitly in the hx program using a
+transform function such as
+.B utf16le() .
+The language itself is encoding-agnostic:
+a password is a sequence of bytes, and a hash function
+receives a sequence of bytes.
+.SK
+.H 2 "Origin"
+.P
+The immediate impetus for hx was a problem encountered
+during analysis of large hash collections with mdxfind.
+When mdxfind searches a file of 32-character hex hashes,
+it tests every supported algorithm that produces a hex
+string of that length.
+A match against
+.B SHA512
+is reported even though SHA-512 normally produces 128
+hex characters \(em mdxfind matched only the first 32
+characters, a prefix collision.
+.P
+The question that followed was deceptively simple:
+\(lqhow do I verify this match?\(rq
+No existing tool could take the description
+\(lqfirst 32 hex characters of the SHA-512 of this password\(rq
+and compute the result.
+The user would need to write a small program, or chain
+together command-line tools with careful attention to
+encoding at each step.
+.P
+This is the problem hx solves.
+The expression
+.ft CW
+cut(sha512(pass), 0, 32)
+.ft R
+is a complete, unambiguous specification that can be
+evaluated by the hx interpreter to produce the exact
+output that mdxfind matched.
+From this starting point, the language grew to encompass
+salted hashes, iterated hashes, compound hashes with
+binary intermediates, and ultimately any composition of
+cryptographic primitives that the password hashing world
+has devised.
+.H 2 "Relationship to Existing Tools"
+.P
+hx exists within the mdxfind tool ecosystem and is designed
+to complement, not replace, the existing tools:
+.BL
+.LI
+.B "mdxfind"
+performs high-speed hash searching across hundreds of
+algorithm types on CPU and GPU.
+The hx language describes exactly what mdxfind computes,
+in a form that can be independently verified.
+An hx expression can be mapped to an mdxfind type number
+(e.g.,
+.ft CW
+sha1(md5(pass) . salt)
+.ft R
+corresponds to
+.B "mdxfind \-m e587" ),
+connecting the readable notation to the optimized engine.
+.LI
+.B "hashpipe"
+is a hash verification tool.
+When hx is integrated into hashpipe (via the
+.B \-X
+flag), all of hashpipe's 500+ hash function implementations
+become available as hx primitives.
+This is the recommended way to use hx for any work beyond
+the basic hash types.
+.LI
+.B "mdsplit"
+separates mdxfind output by type.
+The type names that mdsplit produces (e.g., SHA1MD5PASSSALT)
+correspond directly to hx expressions, providing a
+translation path from mdxfind's compressed type notation
+to the fully explicit hx form.
+.LE
+.H 2 "Modes of Use"
+.P
+hx operates in three modes of increasing complexity:
+.AL
+.LI
+.B "Calculator mode."
+A single expression on the command line, applied to one
+password or to a stream of passwords on standard input.
+This is the most common use: generating test vectors,
+verifying individual hashes, or exploring a hash scheme.
+.DS
+.ft CW
+hashpipe -X 'sha256(pass . salt)' -p password -s 12345
+.ft R
+.DE
+.LI
+.B "Script mode."
+An hx program is read from a file, allowing multi-statement
+computations with variables, loops, and conditionals.
+This mode is required for hash schemes with complex
+iteration patterns.
+.DS
+.ft CW
+hashpipe -F phpbb3.hx -p password -s saltsalt
+.ft R
+.DE
+.LI
+.B "Batch mode."
+In either calculator or script mode, passwords may be
+read from standard input (one per line) instead of
+being specified with
+.BR \-p .
+The hx program is compiled once and executed for each
+input password.
+.DS
+.ft CW
+cat wordlist.txt | hashpipe -X 'md5(pass . salt)' -s 12345
+.ft R
+.DE
+.LE
+.H 1 "Language Specification"
+.PF "'Language Specification' \\\\nP'Waffle'"
+.P
+This section defines the hx language: its lexical structure,
+grammar, type system, evaluation rules, and built-in functions.
+The specification is intended to be precise enough that an
+independent implementation could produce identical output
+for any well-formed hx program.
+.H 2 "The hx Algebra"
+.P
+Every hx expression is built from five kinds of element:
+.BL
+.LI
+.B "Variables"
+\(em the read-only inputs
+.RB ( pass ,
+.BR salt ,
+.BR salt2 ,
+.BR pepper ,
+.BR user )
+and user-defined assignments.
+.LI
+.B "Literal strings"
+\(em fixed byte sequences written in single or double
+quotes.
+Literals serve as HMAC keys, format prefixes
+.RB ( "\(dq$H$9\(dq" ),
+fixed delimiters, and any other byte sequence the
+algorithm specifies in its definition.
+.LI
+.B "Integer literals"
+\(em used as iteration counts, loop bounds, and
+positional arguments to functions such as
+.BR cut() ,
+.BR bcrypt() ,
+and the PBKDF2 family.
+.LI
+.B "Function calls"
+\(em the computational primitives.
+A function takes one or more string (and occasionally
+integer) arguments and produces a single string result.
+.LI
+.B "The concatenation operator"
+.BR . ,
+which joins two byte sequences end to end.
+Concatenation has the lowest expression precedence;
+function calls bind more tightly than concatenation.
+.LE
+.P
+.B "Function composition"
+is the central operation.
+The output of one function call may be supplied as the
+input to another:
+.ft CW
+sha1(md5(pass))
+.ft R
+computes MD5 of the password and then SHA-1 of that
+result.
+Composition is unrestricted: any function output may
+feed any function input, and arbitrary nesting depth is
+permitted.
+The encoding contract (Section 2.5) determines whether
+the inner output is delivered to the outer call as
+canonical text (the default) or as raw bytes (when the
+inner call carries a
+.B _bin
+suffix).
+.P
+.B "Output-role suffixes"
+.RB ( _bin ,
+.BR _hex ,
+.BR _uc ,
+.BR _b64 ,
+.BR _mcf )
+are attached to a function name to select a non-default
+representation of its output.
+The five suffixes form a small algebra of their own:
+every function in the registry computes a canonical
+result; the suffix controls how that result is encoded
+on the way out.
+A suffix that does not apply to a given function family
+is a compile-time error.
+.P
+.B "The emit() function"
+provides multi-value output.
+A single hx program may
+.B emit()
+zero or more intermediate values during evaluation; the
+program's final expression result is also emitted
+unless an earlier
+.B emit()
+call suppresses the automatic emission.
+This algebra is sufficient to describe hash schemes that
+produce several output forms from a single password \(em
+the
+.B SHA1MD5HUM
+family, the
+.B PHPBB3
+variants, the multi-form
+.B SQL5
+output, and any future scheme that follows the same
+pattern.
+.P
+The remainder of this chapter formalises the syntax and
+semantics of these constructs.
+.H 2 "Lexical Structure"
+.P
+An hx program is a sequence of Unicode characters encoded
+as UTF-8.
+The lexer partitions the input into tokens of the following
+classes:
+.H 3 "Identifiers"
+.P
+An identifier begins with a letter (a\(enz, A\(enZ) or
+underscore, followed by zero or more letters, digits, or
+underscores:
+.DS
+.ft CW
+[a\-zA\-Z_][a\-zA\-Z0\-9_]*
+.ft R
+.DE
+.P
+Identifiers serve as both variable names and function names.
+The same identifier may refer to a variable or a function
+depending on context: if followed by
+.B (
+or
+.B ^
+it is a function call; otherwise it is a variable reference.
+.P
+Hyphens are not permitted in identifiers.
+Hash type names that contain hyphens (such as GOST-CRYPTO
+or SHA3-256) use underscores in hx:
+.ft CW
+gost_crypto
+.ft R
+and
+.ft CW
+sha3_256\fR.
+.ft R
+Hashpipe automatically registers both the original hyphenated
+name (for internal lookup) and the underscore variant (for
+use in hx expressions).
+.H 3 "Reserved Words"
+.P
+The following identifiers are reserved and may not be used
+as variable names or function names:
+.TS
+box;
+l l.
+\fBWord\fP	\fBMeaning\fP
+_
+pass	current password
+salt	primary salt value
+salt2	secondary salt value
+pepper	pepper value
+user	user or userid value
+for	loop statement
+to	loop bound keyword
+if	conditional statement
+else	conditional alternative
+.TE
+.TB "Reserved Words"
+.P
+The variables
+.BR pass ,
+.BR salt ,
+.BR salt2 ,
+.BR pepper ,
+and
+.B user
+are pre-populated from the command-line arguments
+.RB ( \-p ,
+.BR \-s ,
+.BR \-S ,
+.BR \-P ,
+.BR \-u ),
+and are read-only; they cannot appear on the left side
+of an assignment.
+.H 3 "Integer Literals"
+.P
+An integer literal is a sequence of one or more digits,
+optionally preceded by a minus sign:
+.DS
+.ft CW
+42
+1000
+\-3
+.ft R
+.DE
+.P
+Integer values are used for iteration counts in the
+.B ^
+operator, loop bounds in
+.B for
+statements, and numeric arguments to functions such as
+.BR cut() .
+.H 3 "String Literals"
+.P
+A string literal is enclosed in double quotes or single quotes.
+Standard backslash escapes are recognized within double-quoted
+strings:
+.DS
+.ft CW
+"hello world"
+'$H$9'
+"prefix\\tsuffix"
+.ft R
+.DE
+.P
+String literals produce byte sequences.
+They are most commonly used for hash format prefixes
+and fixed delimiters in output construction.
+.H 3 "Operators and Delimiters"
+.P
+The following single and multi-character tokens are recognized:
+.TS
+box;
+l l.
+\fBToken\fP	\fBMeaning\fP
+_
+\&.	concatenation
+^	iteration
+ =	assignment
+,	argument separator
+( )	grouping and function call
+{ }	block delimiters
+==	equality comparison
+!=	inequality comparison
+< > <= >=	relational comparison
+;	statement separator
+.TE
+.TB "Operators and Delimiters"
+.H 3 "Statement Separators"
+.P
+Statements are separated by newlines or semicolons.
+Both are equivalent and interchangeable.
+Multiple consecutive separators (blank lines) are permitted
+and ignored.
+.P
+Inside braces
+.RB ( {
+\&...
+.BR } ),
+newlines are treated as whitespace, not as statement
+separators.
+Within a block, statements must be separated by
+semicolons:
+.DS
+.ft CW
+for i = 1 to 10 {
+    h = md5(h); k = sha1(k)
+}
+.ft R
+.DE
+.P
+This rule has one practical consequence: the
+.B else
+keyword of an
+.B if
+statement must appear on the same line as the closing
+brace of the then-block:
+.DS
+.ft CW
+if h == target { x = 1 } else { x = 0 }
+.ft R
+.DE
+.H 3 "Comments"
+.P
+A comment begins with
+.B #
+and extends to the end of the line.
+Comments are ignored by the lexer:
+.DS
+.ft CW
+# This is a comment
+h = md5(pass)   # inline comment
+.ft R
+.DE
+.SK
+.H 2 "Grammar"
+.P
+The following grammar defines the syntax of hx programs
+in extended BNF (Backus\(enNaur Form) notation.
+Terminal symbols are shown in
+.BR bold ;
+non-terminals in
+.I italic .
+Optional elements are enclosed in brackets;
+repetition is indicated by braces.
+.TS
+box;
+l l.
+\fIprogram\fP	\fIsep_opt stmt_list sep_opt\fP
+\fIstmt_list\fP	\fIstmt\fP { \fIseps stmt\fP }
+\fIstmt\fP	\fIassignment\fP | \fIfor_stmt\fP | \fIif_stmt\fP | \fIexpr\fP
+\fIassignment\fP	\fBIDENT\fP \fB=\fP \fIexpr\fP
+\fIfor_stmt\fP	\fBfor\fP \fBIDENT\fP \fB=\fP \fIexpr\fP \fBto\fP \fIexpr\fP \fIblock\fP
+\fIif_stmt\fP	\fBif\fP \fIcondition\fP \fIblock\fP [ \fBelse\fP \fIblock\fP ]
+\fIcondition\fP	\fIexpr\fP \fIrelop\fP \fIexpr\fP
+\fIrelop\fP	\fB==\fP | \fB!=\fP | \fB<\fP | \fB>\fP | \fB<=\fP | \fB>=\fP
+\fIblock\fP	\fB{\fP \fIsep_opt stmt_list sep_opt\fP \fB}\fP
+\fIexpr\fP	\fIprimary\fP | \fIexpr\fP \fB.\fP \fIprimary\fP
+\fIprimary\fP	\fBIDENT\fP | \fBreserved_var\fP | \fBNUMBER\fP
+	| \fBSTRING\fP | \fIfuncall\fP | \fB(\fP \fIexpr\fP \fB)\fP
+\fIfuncall\fP	\fBIDENT\fP \fB(\fP \fIarglist\fP \fB)\fP
+	| \fBIDENT\fP \fB^\fP \fBNUMBER\fP \fB(\fP \fIarglist\fP \fB)\fP
+\fIarglist\fP	\fIexpr\fP { \fB,\fP \fIexpr\fP }
+\fIseps\fP	\fBSEP\fP { \fBSEP\fP }
+\fIsep_opt\fP	[ \fIseps\fP ]
+.TE
+.FG "hx Grammar in Extended BNF"
+.P
+The concatenation operator
+.B .
+is left-associative and has the lowest precedence among
+expression operators.
+Function calls bind more tightly than concatenation.
+.P
+The grammar is implemented using GNU Bison (LALR(1) parser
+generator) and Flex (lexical analyzer generator).
+Three shift/reduce conflicts arise from the interaction of
+optional leading separators with statement lists; all three
+are resolved correctly by Bison's default shift preference.
+.H 2 "Type System"
+.P
+hx has two value types:
+.B strings
+(byte sequences) and
+.BR integers .
+There is no Boolean type; conditions are evaluated by
+comparison operators that consume two values and branch
+accordingly.
+.P
+All hash function inputs and outputs are strings.
+A string is an arbitrary sequence of bytes with an
+associated length; it is not required to be valid UTF-8
+or null-terminated.
+Binary data (raw hash digests) and text data (hex-encoded
+hashes, passwords, salts) are both represented as strings.
+The language makes no distinction between them at the
+type level; the distinction is maintained by convention
+and by the
+.B _bin
+suffix on function names.
+.P
+Integers appear only in three contexts: iteration counts
+in the
+.B ^
+operator, loop bounds and loop variables in
+.B for
+statements, and numeric arguments to functions such as
+.BR cut() .
+Integer values are 64-bit signed quantities.
+.H 2 "The Encoding Contract"
+.P
+The most important design decision in hx is the default
+encoding of hash function outputs.
+This choice permeates the entire language and determines
+whether compound hash expressions produce correct results.
+.P
+.B "The rule is simple:"
+every hash function, HMAC, KDF, or crypt built-in
+returns its
+.I "canonical traditional form"
+by default.
+For fixed-length digests \(em
+.BR md5 ,
+.BR sha1 ,
+.BR sha256 ,
+.BR sha512 ,
+.BR md4 ,
+and the rest of the plain hash and HMAC families \(em
+the canonical form is
+.BR "lowercase hexadecimal" .
+For variable-length key derivation functions \(em
+.BR pbkdf2_* ,
+.BR scrypt ,
+.BR argon2id ,
+.BR argon2i ,
+.BR argon2d
+\(em the canonical form is
+.B "hex of the derived bytes"
+(length = 2 \(mu dklen).
+For structured-output crypt built-ins \(em
+.BR bcrypt ,
+.BR yescrypt ,
+the
+.B md5crypt
+family,
+.BR phpass
+\(em the canonical form is the full
+.BR "MCF (Modular Crypt Format) or PHC (Password Hashing Competition) string"
+as it would appear in a shadow file
+.RB ( $2b$12$... ,
+.BR $y$j9T$... ,
+.BR $1$salt$hash ,
+.BR $H$9... ,
+etc.).
+.P
+This rule was chosen because it matches the convention
+used by the password hashing community.
+When a security researcher writes
+.ft CW
+md5(md5($pass))
+.ft R
+they mean: compute the MD5 of the password, encode the
+16-byte result as 32 lowercase hex characters, then
+compute the MD5 of those 32 characters.
+The outer MD5 receives a 32-byte ASCII input, not a
+16-byte binary input.
+This is what
+.ft CW
+md5(md5(pass))
+.ft R
+computes in hx.
+By the same logic, a security researcher writing
+.ft CW
+bcrypt(pass, salt, 12)
+.ft R
+means the full 60-character
+.B $2b$12$...
+string \(em not the 31-character hash portion, and not
+the raw 23-byte blowfish output.\*F
+.FS
+The internal blowfish state is 24 bytes wide, but the canonical
+OpenBSD implementation encodes only 23 of those bytes into the
+.B $2b$
+hash portion to remain bug-compatible with the original
+implementation.
+The externally accessible raw form is therefore 23 bytes, not 24.
+.FE
+.H 3 "Output-role suffixes"
+.P
+To select a non-default representation of a function's
+output, attach one of five
+.I "output-role suffixes"
+to the function name.
+The suffix is stripped at compile time and sets a flag
+on the
+.B CALL
+instruction; the base function always computes the same
+underlying result, and the suffix controls only how that
+result is returned.
+.TS
+box, tab(|);
+l | l | lw(3.2i).
+\fBSuffix\fP|\fBRole\fP|\fBMeaning\fP
+_
+(none)|canonical|Traditional form for this family.
+_bin|binary|T{
+Raw key material; digest bytes or derived bytes, before any encoding.
+T}
+_hex|hex|T{
+Lowercase hex of \f(CW_bin\fP.
+T}
+_uc|uppercase hex|T{
+Uppercase hex of \f(CW_bin\fP. Distinct from \fBupper()\fP under iteration: the role is what feeds the next round, so \f(CWmd5_uc^N\fP chains uppercase while \f(CWupper(md5^N)\fP uppercases only the final result. The two agree at N=1 and diverge from N=2 onward.
+T}
+_b64|base64|T{
+Native base64 of the hash portion: bcrypt-base64 for \fBbcrypt\fP, crypt-base64 for the \fBmd5crypt\fP family, standard base64 elsewhere.
+T}
+_mcf|MCF/PHC|T{
+Full crypt string. Defined only for families that have a standard MCF form; compile-time error otherwise.
+T}
+.TE
+.TB "Output-role suffixes"
+.P
+For fixed-length digests, the default is identical to
+.BR _hex ;
+the invariant
+.ft CW
+md5(md5(pass)) == md5(md5_hex(pass))
+.ft R
+holds, and both are distinct from
+.ft CW
+md5(md5_bin(pass))
+.ft R
+\&.
+For crypt built-ins the default is identical to
+.BR _mcf ;
+.ft CW
+bcrypt(pass, salt, 12) == bcrypt_mcf(pass, salt, 12)
+.ft R
+\&.
+.P
+A worked example covers all five variants:
+.TS
+box;
+l l.
+\fBExpression\fP	\fBReturns\fP
+_
+\f(CWbcrypt(pass, salt, 12)\fR	60-char $2b$12$<salt22><hash31>
+\f(CWbcrypt_mcf(pass, salt, 12)\fR	same as above (alias)
+\f(CWbcrypt_b64(pass, salt, 12)\fR	31-char bcrypt-base64 hash portion
+\f(CWbcrypt_bin(pass, salt, 12)\fR	23 raw bytes of blowfish output
+\f(CWbcrypt_hex(pass, salt, 12)\fR	46-char hex of the 23 raw bytes
+.TE
+.TB "bcrypt output-role variants"
+.P
+Mixed chains work naturally.
+.ft CW
+sha1(bcrypt_bin(pass, salt, 12))
+.ft R
+feeds 23 raw bytes into SHA-1 and returns a 40-character
+hex digest.
+.ft CW
+sha1(bcrypt(pass, salt, 12))
+.ft R
+feeds the full 60-character
+.B $2b$12$...
+string into SHA-1 \(em a different hash, and almost
+certainly not what was intended.
+.P
+Encoding can also be made explicit using the
+.B hex()
+function.
+The expression
+.ft CW
+hex(md5_bin(pass))
+.ft R
+is equivalent to
+.ft CW
+md5(pass)
+.ft R
+; it takes the raw binary MD5 output and encodes it as
+hex.
+This explicit form is useful when constructing output
+formats or when clarity is more important than brevity.
+.H 3 "Scope of the output-role suffixes"
+.P
+The five suffixes are defined for
+.I "hash functions" ,
+.I "HMAC functions" ,
+.I "key derivation functions" ,
+and
+.I "crypt built-ins"
+\(em any function whose output has a well-defined
+canonical form that a caller might want to override.
+Not every suffix is valid on every family.
+In particular,
+.B _mcf
+is valid only on families that produce an MCF/PHC string
+.RB ( bcrypt ,
+.BR yescrypt ,
+the
+.B md5crypt
+family,
+.BR phpass ),
+and
+.B _b64
+is valid only where a family has a well-defined
+native-base64 hash portion.
+Applying an unsupported suffix is a compile-time error,
+the same rule that rejects
+.B upper_bin
+or
+.BR base64_bin .
+.P
+Applying any output-role suffix to a string transform
+function
+.RB ( upper ,
+.BR lower ,
+.BR rev ,
+.BR cut )
+or a standalone encoding function
+.RB ( base64 ,
+.BR phpass_encode )
+is a compile-time error.
+These functions do not produce a canonical hash output
+and have no encoding step to redirect.
+.P
+The
+.B hex()
+function is a special case.
+.ft CW
+hex_bin(x)
+.ft R
+is defined as the identity function: it returns its
+input unchanged.
+This is consistent with the semantics of
+.B _bin
+as \(lqskip the encoding step\(rq \(em
+.B hex()
+.I is
+the encoding step, so skipping it returns the original input.
+This identity is occasionally useful in generic expressions
+but should not be relied upon for clarity.
+.H 3 "Default output form by family"
+.P
+The following table summarizes the canonical return form
+for each built-in family.
+All entries in this table are implemented as hx
+built-ins.
+.TS H
+expand allbox;
+lw(1.6i) | lw(1.5i) | lw(3.0i).
+\fBFamily\fP	\fBDefault return\fP	\fBExample\fP
+_
+.TH
+.T&
+lw(1.6i) | lw(1.5i) | lp8w(3.0i).
+T{
+Fixed-length digest
+(md5, sha1, sha256,
+sha512, md4, \&...)
+T}	T{
+lowercase hex
+of digest
+T}	T{
+\fCsha1(pass)\fP = 40 hex chars
+T}
+_
+T{
+HMAC
+(hmac_sha1, hmac_sha256,
+hmac_sha512, \&...)
+T}	T{
+lowercase hex
+T}	T{
+\fChmac_sha256(k,m)\fP = 64 hex
+T}
+_
+T{
+PBKDF2
+(pbkdf2_sha1, sha256,
+sha512, md5)
+T}	T{
+hex of
+derived bytes
+T}	T{
+\fCpbkdf2_sha256(p,s,1000,32)\fP = 64 hex
+T}
+_
+scrypt	T{
+hex of
+derived bytes
+T}	T{
+\fCscrypt(p,s,N,r,p,dk)\fP = 2\(mudk hex
+T}
+_
+T{
+argon2
+(argon2i, argon2d,
+argon2id)
+T}	T{
+hex of
+derived bytes
+T}	T{
+\fCargon2id(p,s,t,m,p,dk)\fP = 2\(mudk hex
+T}
+_
+bcrypt	T{
+$2b$...$ MCF
+(60 chars)
+T}	T{
+\fCbcrypt(p,s,12)\fP = $2b$12$<22><31>
+T}
+_
+yescrypt	T{
+$y$...$ MCF
+string
+T}	T{
+\fCyescrypt(p,s,...)\fP = $y$j9T$salt$hash
+T}
+_
+T{
+md5crypt
+T}	$1$...$ MCF	\fCmd5crypt(p,s)\fP = $1$salt$hash
+_
+apr1	$apr1$...$ MCF	\fCapr1(p,s)\fP
+_
+sha256crypt	$5$...$ MCF	\fCsha256crypt(p,s,r)\fP
+_
+sha512crypt	$6$...$ MCF	\fCsha512crypt(p,s,r)\fP
+_
+sm3crypt	$sm3$...$ MCF	\fCsm3crypt(p,s,r)\fP
+_
+gost12_512crypt	$gost12512$...$ MCF	\fCgost12_512crypt(p,s,r)\fP
+_
+descrypt	T{
+13-char
+salt+hash
+T}	\fCdescrypt(p,s)\fP = \fCsshash\fP
+_
+phpass	T{
+$H$...$ MCF
+(34 chars)
+T}	\fCphpass(p,s,N)\fP = $H$9<salt><hash>
+_
+sha1crypt	$sha1$...$ MCF	\fCsha1crypt(p,s,r)\fP
+_
+bsdicrypt	T{
+_<rounds><salt>
+<hash>
+T}	\fCbsdicrypt(p,s)\fP
+_
+gost_yescrypt	$gy$...$ MCF	\fCgost_yescrypt(p,s)\fP
+_
+sevenzip	T{
+$7z$ structure
+(10 or 12 fields)
+T}	\fCsevenzip(p,s)\fP
+_
+cmiyc	$cmiyc$...$	\fCcmiyc(p,s)\fP
+.TE
+.TB "Default output form of each built-in family"
+.H 2 "Evaluation Model"
+.P
+An hx program is processed in three phases:
+parsing, compilation, and execution.
+.H 3 "Parsing"
+.P
+The input text is tokenized by the Flex-generated lexer
+and parsed by the Bison-generated parser into an abstract
+syntax tree (AST).
+Each node in the AST represents a language construct:
+literal value, variable reference, function call,
+concatenation, assignment, loop, conditional, or block.
+.P
+The parser handles the brace-depth-aware newline rule:
+the lexer tracks the nesting depth of
+.B {
+\&...
+.B }
+blocks and emits newlines as separator tokens only at
+depth zero.
+.H 3 "Compilation"
+.P
+A single recursive walk of the AST produces a flat
+array of bytecode instructions.
+During this walk, the compiler:
+.BL
+.LI
+Resolves variable names to integer slot indices.
+The four built-in variables occupy fixed slots:
+.B pass
+= 0,
+.B salt
+= 1,
+.B salt2
+= 2,
+.B pepper
+= 3.
+User-defined variables are assigned sequential slots
+starting at 4.
+.LI
+Resolves function names to entries in the function registry.
+If the name ends in
+.BR _bin ,
+the suffix is stripped and the
+.I binary
+flag is set on the
+.B CALL
+instruction.
+If the base name is not found in the registry, compilation
+fails with an error message identifying the unknown function
+and the source line.
+.LI
+Collects string constants into a deduplication table.
+.LI
+Emits jump instructions for
+.B for
+loops and
+.B if
+conditionals, with forward references patched after
+the target address is known.
+.LI
+Tracks stack depth to determine the maximum stack
+size needed at runtime.
+.LE
+.P
+The compiler produces a
+.I program
+structure containing the instruction array, the string
+constant table, the variable name table (for diagnostics),
+and the computed maximum stack depth.
+.SK
+.H 3 "Execution"
+.P
+The bytecode is executed by a stack-based virtual machine.
+The VM maintains:
+.BL
+.LI
+A
+.I stack
+of values (strings and integers), used for
+expression evaluation.
+.LI
+A
+.I variable array
+indexed by slot number, pre-populated with the
+built-in variables before each run.
+.LI
+A
+.I "bump arena"
+allocator for all per-password string data.
+The arena is reset (rewound to offset zero) before
+each password, ensuring that no memory is leaked
+across runs and that allocation is a single pointer
+increment.
+.LE
+.P
+The VM executes instructions in a loop with a
+.B switch
+dispatch on the opcode.
+The instruction set is:
+.TS
+box;
+l l l.
+\fBOpcode\fP	\fBOperand\fP	\fBEffect\fP
+_
+PUSH_VAR	slot	Push variable onto stack
+PUSH_STR	index	Push string constant
+PUSH_INT	value	Push integer
+STORE	slot	Pop stack top into variable
+CALL	entry, nargs, bin	Pop args, call function, push result
+CONCAT	\(em	Pop two values, push concatenation
+HALT	\(em	Stop; stack top is result
+JUMP	address	Unconditional jump
+INC	slot	Increment integer variable
+JUMP_LE	address	Pop two integers, jump if a \(<= b
+JUMP_EQ	address	Pop two values, jump if equal
+JUMP_NE	address	Pop two values, jump if not equal
+DUP	\(em	Duplicate stack top
+POP	\(em	Discard stack top
+.TE
+.TB "Bytecode Instruction Set"
+.P
+The
+.B CALL
+instruction carries a direct pointer to the function
+entry in the registry, resolved at compile time.
+No name lookup occurs during execution.
+The
+.I binary
+flag is also encoded in the instruction, so the
+.B _bin
+decision is made once at compile time, not per-password.
+.P
+The result of a program is the value on top of the stack
+when the
+.B HALT
+instruction is reached.
+In calculator mode, this value is written to standard output,
+followed by a newline.
+If the result is a binary string (from a
+.B _bin
+function), the raw bytes are written directly; the user
+is responsible for applying
+.B hex()
+or another encoding function if text output is desired.
+.H 2 "Diagnostics and Error Handling"
+.P
+hx defines the following error conditions.
+A conforming implementation must report these errors
+and must not silently produce incorrect output.
+.H 3 "Compile-Time Errors"
+.P
+The following conditions are detected during compilation
+and prevent execution:
+.BL
+.LI
+.B "Unknown function" \(em
+the identifier in a function call does not match any
+entry in the function registry (after stripping
+.BR _bin ,
+if present).
+The error message must identify the function name
+and the source line.
+.LI
+.B "Invalid _bin application" \(em
+the
+.B _bin
+suffix is applied to a function that is not a hash
+function or HMAC function (see Section 2.4.1).
+.LI
+.B "Syntax error" \(em
+the input does not conform to the grammar defined
+in Section 2.2.
+The error message should identify the source line
+and the unexpected token.
+.LE
+.H 3 "Runtime Behavior"
+.P
+The following conditions may arise during execution.
+hx defines their behavior to ensure reproducibility:
+.BL
+.LI
+.B "Empty strings" \(em
+an empty password, salt, or intermediate value is
+a valid zero-length byte sequence.
+Hash functions accept zero-length input and produce
+their standard digest (e.g.,
+.ft CW
+md5("")
+.ft R
+produces
+.ft CW
+d41d8cd98f00b204e9800998ecf8427e\fR).
+.ft R
+.LI
+.B "cut() bounds clamping" \(em
+if the
+.I start
+argument exceeds the string length, the result is
+an empty string.
+If
+.I start
++
+.I length
+exceeds the string length, the result is truncated
+to the available bytes.
+Negative
+.I start
+values that resolve to a position before the
+beginning of the string are clamped to zero.
+These are not errors.
+.LI
+.B "for loop with start > end" \(em
+if the start value exceeds the end value, the loop
+body is not executed.
+This is not an error.
+.LI
+.B "Integer overflow" \(em
+iteration counts and loop bounds are 64-bit signed
+integers.
+Values exceeding
+.SU 2 63
+\(en 1 produce
+undefined results.
+In practice, iteration counts above
+.SU 2 32
+are computationally infeasible and are likely
+user errors.
+.LI
+.B "Stack overflow" \(em
+the maximum stack depth is computed at compile time.
+Programs that exceed implementation limits (deeply
+nested function calls) may be rejected at compile
+time or may produce undefined behavior at runtime.
+.LI
+.B "Binary data in text transforms" \(em
+applying
+.B upper()
+or
+.B lower()
+to binary data (e.g., the output of a
+.B _bin
+function) operates on individual bytes using the
+C locale.
+Bytes that are not ASCII letters are passed through
+unchanged.
+This is defined behavior, not an error.
+.LE
+.H 2 "Program Structure"
+.P
+An hx program is a sequence of statements.
+The last expression evaluated becomes the program's result.
+.P
+A single-expression program:
+.DS
+.ft CW
+sha256(pass . salt)
+.ft R
+.DE
+.P
+A multi-statement program with the result on the last line:
+.DS
+.ft CW
+h = md5_bin(salt . pass)
+for i = 1 to 2047 {
+    h = md5_bin(h . pass)
+}
+hex(h)
+.ft R
+.DE
+.P
+The final
+.ft CW
+hex(h)
+.ft R
+is an expression statement; its value is left on the stack
+and becomes the program output.
+.H 1 "Functions"
+.PF "'Functions' \\\\nP'Waffle'"
+.P
+Functions are the computational primitives of hx.
+Every function takes one or more string arguments and
+produces a string result.
+Functions are registered in a flat table and looked up
+by name at compile time.
+.H 2 "Hash Functions"
+.P
+When hx is used via
+.B "hashpipe \-X"
+or
+.BR "hashpipe \-F" ,
+every hash type registered in hashpipe's type table
+is available as an hx function.
+The function name is the mdxfind type name, lowercased,
+with hyphens replaced by underscores.
+.P
+The following table lists the hash functions corresponding
+to mdxfind types e1 through e31 (the primitive hash
+algorithms), plus selected higher-numbered types.
+All functions accept the
+.B _bin
+suffix for raw binary output.
+.TS
+box;
+l l l l.
+\fBFunction\fP	\fBDigest bytes\fP	\fBHex chars\fP	\fBmdxfind type\fP
+_
+md5	16	32	e1 MD5
+md4	16	32	e3 MD4
+md2	16	32	e4 MD2
+wrl	64	128	e5 WRL (Whirlpool)
+hav128	16	32	e6 HAV128
+sha0	20	40	e7 SHA0
+sha1	20	40	e8 SHA1
+sha224	28	56	e9 SHA224
+sha256	32	64	e10 SHA256
+sha384	48	96	e11 SHA384
+sha512	64	128	e12 SHA512
+gost	32	64	e13 GOST
+gost_crypto	32	64	e14 GOST-CRYPTO
+hav256	32	64	e15 HAV256
+rmd128	16	32	e16 RMD128
+rmd160	20	40	e17 RMD160
+tiger	24	48	e18 TIGER
+tth	24	48	e19 TTH
+ed2k	16	32	e20 ED2K
+aich	20	40	e21 AICH
+has160	20	40	e22 HAS160
+edon256	32	64	e23 EDON256
+edon512	64	128	e24 EDON512
+sne128	16	32	e25 SNE128
+sne256	32	64	e26 SNE256
+md6	16	32	e27 MD6
+md6128	16	32	e28 MD6128
+md6256	32	64	e29 MD6256
+md6512	64	128	e30 MD6512
+.TE
+.TB "Primitive Hash Functions (e1\(ene30)"
+.P
+Types beyond e31 include additional Haval variants
+(hav128_4, hav128_5, hav160_3, etc.), the full BLAKE,
+BMW, CubeHash, ECHO, Fugue, Groestl, Hamsi, JH, Keccak,
+SHA-3, Luffa, Shabal, SHAvite, SIMD, and Skein families,
+as well as HMAC variants and keyed constructions.
+All are available by their lowercased, underscore-normalized
+names.
+.P
+.B "Uppercase hash types"
+(such as MD5UC, e2) are not separate functions in hx.
+The
+.B upper()
+transform function is used instead:
+.ft CW
+upper(md5(pass))
+.ft R
+is the hx equivalent of mdxfind type e2 (MD5UC).
+This is more explicit: the uppercase encoding is a
+formatting operation, not a property of the hash function.
+.H 2 "HMAC Functions"
+.P
+HMAC functions take two arguments: the key and the message.
+.DS
+.ft CW
+hmac_sha1(pass, salt)     # HMAC-SHA1, key=pass, msg=salt
+hmac_sha256(pass, salt)   # HMAC-SHA256
+.ft R
+.DE
+.P
+The convention follows the standard HMAC definition:
+the first argument is the key, the second is the message.
+.H 2 "String Transform Functions"
+.P
+Transform functions operate on strings without performing
+cryptographic hashing.
+.TS
+box;
+l l l.
+\fBFunction\fP	\fBArguments\fP	\fBDescription\fP
+_
+hex(x)	1	Encode bytes as lowercase hex
+fromhex(x)	1	Decode hex string to bytes
+upper(x)	1	Convert to uppercase
+lower(x)	1	Convert to lowercase
+rev(x)	1	Reverse byte sequence
+rotate(x, N)	2	Rotate string by N positions
+cap(x)	1	Capitalize first lowercase letter
+cap(x, N)	2	Capitalize letter at position N
+rot13(x)	1	ROT13 alphabetic rotation
+pad(x, N)	2	Null-pad to N bytes
+xor(a, b)	2	Byte-wise exclusive OR
+and(a, b)	2	Byte-wise AND
+or(a, b)	2	Byte-wise OR
+wperm(x, w0, w1, ...)	2+	Permute 4-byte words
+bswap32(x)	1	Reverse bytes within each 4-byte group
+length(x)	1	Byte length (returns integer)
+.TE
+.TB "String Transform Functions"
+.P
+The
+.B hex()
+function is particularly important for explicit encoding
+control.
+The expression
+.ft CW
+hex(md5_bin(pass))
+.ft R
+is equivalent to
+.ft CW
+md5(pass)\fR;
+.ft R
+both produce the same 32-character hex string.
+The explicit form is preferred when the intent is to
+emphasize that a binary intermediate is being encoded
+for output.
+.P
+The
+.B rotate()
+function rotates a string by N character positions.
+Positive N rotates right (last N characters move to
+the front); negative N rotates left (first |N|
+characters move to the end):
+.DS
+.ft CW
+rotate("abcdef", 2)    # "efabcd"
+rotate("abcdef", -2)   # "cdefab"
+rotate(md5(pass), 5)   # MD5 hex rotated right by 5
+.ft R
+.DE
+.P
+This function is essential for expressing rotated hash
+matches, where the hex representation of a hash has been
+cyclically shifted before storage.
+mdxfind detects these as
+.ft CW
+rotNN_TYPExMM\fR
+.ft R
+in its output.
+The hx equivalent is
+.ft CW
+rotate(type(pass), N)\fR.
+.ft R
+.P
+The
+.B xor()
+function performs byte-wise exclusive OR on two byte
+sequences.
+If the arguments are of unequal length, the shorter
+argument is cycled (repeated) to match the length of
+the longer.
+This is primarily useful for expressing the internal
+structure of HMAC (ipad/opad XOR) and for obfuscation
+schemes that XOR data with a key:
+.DS
+.ft CW
+xor(sha1_bin(pass), salt)
+.ft R
+.DE
+.P
+The
+.B and()
+and
+.B or()
+functions perform byte-wise AND and OR respectively,
+with the same cycling semantics as
+.BR xor() .
+These are useful for masking digest bytes:
+.DS
+.ft CW
+hex(and(sha1_bin(pass), "\\x00\\x00\\x00\\x00\\xff..."))
+.ft R
+.DE
+.P
+The
+.B cap()
+function capitalizes a letter within a string.
+With one argument, it finds and capitalizes the first
+lowercase ASCII letter.
+With two arguments, it capitalizes the letter at the
+specified position:
+.DS
+.ft CW
+cap(md5(pass))         # first lowercase letter
+cap(md5(pass), 0)      # character at position 0
+.ft R
+.DE
+.P
+The
+.B rot13()
+function applies ROT13 alphabetic rotation to each
+ASCII letter, leaving non-letters unchanged.
+.P
+The
+.B pad()
+function null-pads a value to a fixed length.
+If the input is shorter than the specified length,
+zero bytes are appended; if longer, it is truncated.
+This is required for schemes that use fixed-width fields:
+.DS
+.ft CW
+md5(pad(pass, 100))    # RADMIN2
+.ft R
+.DE
+.P
+The
+.B bswap32()
+function reverses the byte order within each 4-byte
+group of its argument, performing a 32-bit
+byte-swap on every complete group.
+If the input length is not a multiple of 4, the
+trailing 1\(en3 bytes are copied unchanged:
+.BL
+.LI
+.ft CW
+bswap32(fromhex("aabbccdd"))
+.ft R
+\(-> 0xddccbbaa (4 bytes: one full group reversed)
+.LI
+.ft CW
+bswap32(fromhex("aabbccddee"))
+.ft R
+\(-> 0xddccbbaa 0xee (5 bytes: one group reversed, one byte unchanged)
+.LI
+.ft CW
+bswap32(fromhex("aabb"))
+.ft R
+\(-> 0xaabb (2 bytes: no full group, copied as-is)
+.LI
+.ft CW
+bswap32("")
+.ft R
+\(-> "" (empty)
+.LE
+.P
+The function is intended for converting between
+big-endian and little-endian representations of 32-bit
+word arrays, as commonly encountered in hash digest
+output.
+Applied to text, the result is meaningless.
+.P
+The
+.B wperm()
+function permutes 4-byte words within a byte sequence.
+The first argument is the data; subsequent arguments are
+zero-based word indices specifying the new order:
+.DS
+.ft CW
+hex(wperm(md5_bin(pass), 3, 2, 0, 1))  # words d,c,a,b
+.ft R
+.DE
+.P
+The
+.B length()
+function returns the byte length of its argument as an
+integer.
+The result has both an integer value (for use in loop
+bounds and comparisons) and a string representation
+(for concatenation):
+.DS
+.ft CW
+for i = 0 to sub(length(pass), 1) {
+    h = h . md5(cut(pass, i, 1))
+}
+.ft R
+.DE
+.H 2 "Extraction Functions"
+.P
+Extraction functions select portions of a string.
+.H 3 "cut()"
+.P
+The
+.B cut()
+function extracts a substring, with semantics similar to
+the C library function
+.BR substr() .
+It accepts one, two, or three arguments:
+.TS
+box;
+l l.
+\fBForm\fP	\fBMeaning\fP
+_
+cut(x)	identity (returns x unchanged)
+cut(x, start)	from start to end of string
+cut(x, start, length)	length characters from start
+.TE
+.TB "cut() Function Forms"
+.P
+The
+.I start
+position is zero-based.
+A negative
+.I start
+counts from the end of the string:
+.DS
+.ft CW
+cut("abcdef", 2, 3)     # "cde"
+cut("abcdef", \-3)        # "def"
+cut("abcdef", \-3, 2)     # "de"
+.ft R
+.DE
+.H 3 "trunc()"
+.P
+.B trunc()
+is a convenience alias for
+.ft CW
+cut(x, 0, n)\fR:
+.ft R
+.DS
+.ft CW
+trunc(sha512(pass), 32)  # first 32 hex characters
+.ft R
+.DE
+.H 2 "Encoding Functions"
+.H 3 "base64()"
+.P
+Standard Base64 encoding as defined in RFC 4648, with
+.B =
+padding characters.
+Primarily used with
+.B _bin
+outputs to produce base64-encoded hash digests:
+.DS
+.ft CW
+base64(md5_bin(pass))
+.ft R
+.DE
+.H 3 "phpass_encode()"
+.P
+The itoa64 encoding used by phpass, PHPBB3, and WordPress.
+This encoding uses the 64-character alphabet
+.ft CW
+\&./0-9A-Za-z
+.ft R
+with little-endian 6-bit packing.
+A 16-byte MD5 digest produces 22 encoded characters.
+.DS
+.ft CW
+phpass_encode(md5_bin(pass))
+.ft R
+.DE
+.P
+This function is essential for producing the correct
+output format for PHPBB3 and WordPress hashes, where
+the final hash value is not hex-encoded but uses this
+custom alphabet.
+.H 3 "sha512crypt_encode()"
+.P
+The custom base64 encoding used by SHA-512 crypt
+.RB ( $6$ ).
+Uses the same alphabet as phpass
+.RB ( ./0-9A-Za-z )
+but with a different byte permutation and big-endian
+bit packing specific to the crypt(3) specification.
+.H 3 "bcrypt_encode()"
+.P
+The custom base64 encoding used by bcrypt, with alphabet
+.ft CW
+\&./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\fR.
+.ft R
+.H 3 "frombase64()"
+.P
+Decodes a standard base64 string (RFC 4648) to raw bytes.
+The inverse of
+.BR base64() .
+.BR = -padding
+is handled correctly.
+This is required for hash types where the salt is
+stored in base64 encoding:
+.DS
+.ft CW
+sha1(utf16le(pass) . frombase64(salt))
+.ft R
+.DE
+.H 3 "fromhex()"
+.P
+Decodes a hexadecimal string to raw bytes.
+The inverse of
+.BR hex() .
+Each pair of hex characters produces one byte.
+.H 3 "progress_encode()"
+.P
+The custom base64-style encoding used by Progress
+OpenEdge passwords.
+Operates on a 16-byte MD5 digest and produces a
+22-character output drawn from the alphabet
+.ft CW
+\&./0-9A-Za-z\fR.
+.ft R
+The byte-permutation and bit-packing differ from
+both
+.B phpass_encode()
+and
+.BR sha512crypt_encode() ;
+the function exists to faithfully reproduce the
+on-disk Progress OpenEdge format.
+.H 3 "juniper_encode()"
+.P
+The Type-9 / "$9$" password encoding used by Juniper
+Junos OS.
+Operates on a 16-byte MD5 digest and produces a
+13-character ASCII output using a fixed permuted
+alphabet defined by Juniper.
+The result is the
+.B $9$
+secret stored in
+.B configuration
+files.
+.H 3 "cisco_pix_encode()"
+.P
+The 16-character Base64 encoding used by Cisco PIX
+and ASA enable/local password hashes.
+Operates on a 16-byte MD5 digest and produces a
+16-character output using the alphabet
+.ft CW
+\&./0-9A-Za-z\fR
+.ft R
+with PIX/ASA-specific bit packing.
+The PIX password algorithm itself is
+.IB md5 (pad(pass\ .\ salt,\ 16))
+followed by this encoding;
+.B cisco_pix_encode()
+covers only the encoding step.
+.H 3 "lotus64_encode()"
+.P
+The Lotus / Domino base64-style encoding used in the
+Domino-6 password format.
+Operates on a 10-byte buffer (8 hash bytes plus 2
+length/header bytes) and produces a 14-character
+output, which is the body of an
+.B (Gxxxxxxxxxxxxx)
+Domino-6 hash.
+.H 3 "besder_encode()"
+.P
+The 8-character lossy fold used by Besder camera
+authentication (mdxfind type e963).
+Accepts a 16-byte input (typically an MD5 digest);
+for each of the four 4-byte groups, two characters
+are emitted from the alphabet
+.ft CW
+0-9A-Za-z\fR
+.ft R
+using the rule
+.RB ( ( b 0\fB+\fPb 1 )
+.B & 0xff
+.B "\\(mu 62" ).
+The expression
+.ft CW
+besder_encode(md5_bin(pass))
+.ft R
+reproduces the BESDER-AUTH (e960) hash format.
+.H 3 "dahua_encode()"
+.P
+The Dahua-camera variant of the same fold used by
+.BR besder_encode() ,
+without the
+.B & 0xff
+byte truncation
+.RB ( ( b 0\fB+\fPb 1 )
+.BR "\\(mu 62" ).
+This corresponds to mdxfind type e959 (DAHUA-AUTH).
+.H 2 "Cipher Functions"
+.P
+Cipher functions wrap the OpenSSL block-cipher
+primitives used by hash schemes that include an
+explicit encrypt/decrypt step.
+All produce raw ciphertext or plaintext bytes;
+the default rendering is lowercase hex, but the
+.BR _bin ,
+.BR _hex ,
+and
+.B _b64
+suffixes apply per the encoding contract.
+.TS
+box;
+l l l.
+\fBFunction\fP	\fBArguments\fP	\fBDescription\fP
+_
+des(key, pt)	2	Single-DES ECB encrypt of one 8-byte block
+des3(key, pt)	2	Triple-DES (EDE) ECB encrypt of one 8-byte block
+aes_ecb_encrypt(key, pt)	2	AES-ECB encrypt; key 16/24/32 bytes
+aes_cbc_encrypt(key, iv, pt)	3	AES-CBC encrypt, no padding
+aes_cbc_decrypt(key, iv, ct)	3	AES-CBC decrypt, no padding strip
+aes_unwrap(kek, wrapped)	2	RFC 3394 AES Key Unwrap
+.TE
+.TB "Cipher Functions"
+.P
+.B des()
+and
+.B des3()
+operate on a single 8-byte block.
+The key is zero-padded (or truncated) to 8 or 24
+bytes; the plaintext is padded to 8 bytes if shorter.
+These cover legacy schemes such as Oracle 7
+.RB ( oracle7() ,
+which calls
+.BR des() ),
+AS/400 password hashes
+.RB ( as400_des() ),
+and Domino-5 challenge mixing.
+.P
+.B aes_ecb_encrypt()
+encrypts a positive multiple of 16 bytes under
+AES-128, AES-192, or AES-256, selected by the key
+length.
+This is the building block for the AES-NOKDF family
+(e963/e964/e965), where the password is zero-padded
+to the key size and the salt is the single-block
+plaintext:
+.DS
+.ft CW
+aes_ecb_encrypt(pad(pass, 32), fromhex(salt))
+.ft R
+.DE
+.P
+.B aes_cbc_encrypt()
+and
+.B aes_cbc_decrypt()
+operate on positive multiples of 16 bytes with a
+16-byte IV.
+Neither function performs PKCS#7 padding or
+strip-on-output: the caller is responsible for
+preparing or verifying the padding bytes
+explicitly.
+This deliberate choice exposes the raw block
+behavior so that schemes which use a non-standard
+padding marker (e.g.\ Veeam VBK's 12-byte
+.B 0x0c
+trailer) can verify the marker themselves with a
+.B cut()
+plus equality test:
+.DS
+.ft CW
+dk = pbkdf2_sha1_bin(utf16le(pass), salt, iter, 48)
+pt = aes_cbc_decrypt_bin(cut(dk,0,32), cut(dk,32,16), ct)
+if cut(pt,4,12) == fromhex("0c0c0c0c0c0c0c0c0c0c0c0c") { emit("ok") }
+.ft R
+.DE
+.P
+.B aes_unwrap()
+implements the RFC 3394 AES Key Wrap reverse
+operation.
+The key-encryption key
+.RI ( kek )
+must be 16 or 32 bytes (AES-128 or AES-256), and the
+wrapped input must be
+.IR 8\ +\ 8 n
+bytes for some
+.I "n >= 1" .
+On a successful unwrap (the leading IV matches
+.BR 0xa6a6a6a6a6a6a6a6 ),
+the function returns the
+.IR 8 n -byte
+plaintext;
+on IV mismatch, it returns the empty string.
+The empty/non-empty distinction is the standard way
+to verify Apple FileVault/APFS passwords:
+.DS
+.ft CW
+length(aes_unwrap(pbkdf2_sha256_bin(pass, salt, iter, 32), wkey)) > 0
+.ft R
+.DE
+.H 2 "Proprietary Algorithm Primitives"
+.P
+A small number of hash schemes use proprietary,
+hand-built password mixers that are not derived from
+standard hash or KDF building blocks.
+For each such scheme the algorithm has been ported
+verbatim from
+.B mdxfind.c
+and exposed as an opaque hx primitive.
+.TS
+box;
+l l l.
+\fBFunction\fP	\fBArguments\fP	\fBDescription\fP
+_
+domino5(pass)	1	Lotus Domino 5 challenge mixer
+domino6(pass)	1	Lotus Domino 6 password hash (calls lotus64_encode)
+oracle7(user, pass)	2	Oracle 7 / 8 / 9 / 10 user-and-password DES chain
+sap_bcode(user, pass)	2	SAP CODVN B (BCODE) password digest
+as400_des(user, pass)	2	IBM AS/400 OS/400 DES-based password hash
+axcrypt(pass)	1	AxCrypt key-file mixing function
+racf_encrypt(user, pass)	2	IBM RACF DES-based password hash
+racf_kdfaes(pass, user, hdr, salt)	4	IBM RACF KDFAES (HMAC-SHA256 memory mixer)
+.TE
+.TB "Proprietary Algorithm Primitives"
+.P
+Each of these primitives is documented in a
+trailing footnote of
+.BR hx (8)
+.RI "(Appendix A,"
+.IR "Notes [1]\(en[32]" ),
+which gives the C reference implementation, the
+exact buffer layout, and any required input
+preprocessing.
+.P
+The default rendering for the digest-producing
+primitives
+.RB ( oracle7() ,
+.BR sap_bcode() ,
+.BR as400_des() ,
+.BR axcrypt() ,
+.BR racf_encrypt() ,
+.BR racf_kdfaes() ,
+.BR domino5() )
+is lowercase hex; the
+.BR _bin ,
+.BR _hex ,
+.B _b64
+suffixes apply.
+The encoder-style primitives
+.RB ( domino6() ,
+.BR lotus64_encode() ,
+.BR juniper_encode() ,
+.BR cisco_pix_encode() ,
+.BR progress_encode() ,
+.BR besder_encode() ,
+.BR dahua_encode() )
+return ASCII text and accept no role suffix.
+.H 2 "Character Encoding Functions"
+.P
+Character encoding functions convert the byte
+representation of a string.
+.TS
+box;
+l l l.
+\fBFunction\fP	\fBArguments\fP	\fBDescription\fP
+_
+utf16le(x)	1	Convert UTF-8 to UTF-16 little-endian
+utf16be(x)	1	Convert UTF-8 to UTF-16 big-endian
+utf7(x)	1	Convert to UTF-7 encoding
+zext16(x)	1	Zero-extend each byte to 16 bits little-endian
+from_cp1252(x)	1	Convert UTF-8 to Windows-1252 (Latin-1 superset)
+from_cp1251(x)	1	Convert UTF-8 to Windows-1251 (Cyrillic)
+ebcdic(x)	1	Convert ASCII to IBM EBCDIC (CP037)
+.TE
+.TB "Character Encoding Functions"
+.P
+.B utf16le()
+is essential for NTLM and related Microsoft hash types,
+which hash the UTF-16LE encoding of the password rather
+than its UTF-8 or ASCII representation:
+.DS
+.ft CW
+md4(utf16le(pass))     # NTLM
+.ft R
+.DE
+.P
+The conversion handles full Unicode: multi-byte UTF-8
+sequences are properly decoded and re-encoded as
+UTF-16, including surrogate pairs for characters above
+U+FFFF.
+.P
+.B zext16()
+performs the same byte-level expansion as
+.B utf16le()
+but without UTF-8 decoding: every input byte is paired
+with a trailing 0x00, regardless of whether the input
+is valid UTF-8.
+This is used by hash schemes that name themselves after
+UTF-16LE but in practice operate on the raw byte stream.
+.P
+.B from_cp1252()
+and
+.B from_cp1251()
+convert a UTF-8 string to the corresponding single-byte
+Windows code page.
+Characters that are not representable in the target code
+page are passed through as
+.B '?' .
+These conversions are required by hashes which were
+historically computed over the legacy single-byte
+encoding rather than UTF-8.
+.P
+.B ebcdic()
+converts an ASCII string to IBM EBCDIC code page 037
+(the standard EBCDIC mapping used in z/OS RACF and
+related mainframe contexts).
+The companion EBCDIC variant CP1047 is used internally
+by
+.B racf_kdfaes()
+and is not exposed as a separate primitive.
+.H 2 "Arithmetic Functions"
+.P
+Arithmetic functions operate on integer values and
+return integer results (with a string representation
+for use in string context).
+.TS
+box;
+l l l.
+\fBFunction\fP	\fBArguments\fP	\fBDescription\fP
+_
+add(a, b)	2	Integer addition
+sub(a, b)	2	Integer subtraction
+mul(a, b)	2	Integer multiplication
+mod(a, b)	2	Integer modulo (b = 0 returns 0)
+length(x)	1	Byte length of x
+.TE
+.TB "Arithmetic Functions"
+.P
+These functions enable computed loop bounds and
+conditional iteration patterns:
+.DS
+.ft CW
+for i = 0 to sub(length(pass), 1) {
+    h = h . md5(cut(pass, i, 1))
+}
+.ft R
+.DE
+.H 2 "Output Function"
+.H 3 "emit()"
+.P
+The
+.B emit()
+function writes its argument to standard output,
+followed by a newline, and returns the value unchanged
+(passthrough).
+It is used for hash types that produce multiple
+output values from a single password:
+.DS
+.ft CW
+h = md5(pass)
+emit(md5(pass . h))
+emit(md5(pass . ":" . h))
+.ft R
+.DE
+.P
+When a program contains any
+.B emit()
+calls, the automatic final-value output is suppressed.
+Without
+.BR emit() ,
+the last expression value is output as before.
+This rule is unambiguous: the presence of
+.B emit()
+in the compiled program determines the output mode.
+.P
+If
+.B emit()
+receives binary data (any byte outside the printable
+ASCII range 0x20\(en0x7e), it automatically hex-encodes
+the output.
+This prevents raw binary from corrupting the output
+stream when
+.B _bin
+results are emitted.
+.SK
+.H 2 "Key Derivation Functions"
+.P
+KDF functions are opaque built-ins that call native
+implementations.
+They accept integer parameters for cost/iteration
+factors:
+.TS
+box;
+l l.
+\fBFunction\fP	\fBSignature\fP
+_
+bcrypt	bcrypt(pass, salt, cost)
+scrypt	scrypt(pass, salt, N, r, p, dklen)
+argon2id	argon2id(pass, salt, time, mem_kb, parallel, dklen)
+argon2i	argon2i(pass, salt, time, mem_kb, parallel, dklen)
+argon2d	argon2d(pass, salt, time, mem_kb, parallel, dklen)
+yescrypt	yescrypt(pass, setting)
+pbkdf2_sha1	pbkdf2_sha1(pass, salt, iterations, dklen)
+pbkdf2_sha256	pbkdf2_sha256(pass, salt, iterations, dklen)
+pbkdf2_sha512	pbkdf2_sha512(pass, salt, iterations, dklen)
+pbkdf2_md5	pbkdf2_md5(pass, salt, iterations, dklen)
+.TE
+.TB "Key Derivation Functions"
+.P
+PBKDF2 functions are available in both standalone and
+hashpipe builds (via OpenSSL).
+The remaining KDFs require hashpipe integration.
+.P
+.B bcrypt()
+returns the full crypt string
+.ft CW
+($2b$CC$salt+hash)\fR
+.ft R
+by default, or the hash portion only with
+.BR _bin .
+The cost parameter ranges from 4 to 31 (default 12).
+.P
+.B scrypt()
+parameters: N = CPU/memory cost (power of 2, default 16384),
+r = block size (default 8), p = parallelism (default 1),
+dklen = output length (default 32).
+.P
+.B argon2id()
+parameters: time = iterations (default 3),
+mem_kb = memory in KB (default 65536),
+parallel = lanes (default 4),
+dklen = output length (default 32).
+.H 1 "Iteration and Control Flow"
+.PF "'Iteration and Control Flow' \\\\nP'Waffle'"
+.P
+Many password hashing schemes apply a hash function
+repeatedly to increase computational cost, or branch
+on a comparison of a derived value against a known
+target.
+hx provides three mechanisms for expressing iteration
+and conditional execution: the
+.B ^
+operator, the
+.B for
+loop, and the
+.B if
+statement.
+.H 2 "The ^ Operator"
+.P
+The caret operator provides concise notation for simple
+re-hashing, where the output of one round becomes the
+sole input to the next:
+.DS
+.ft CW
+md5^1000(pass)
+.ft R
+.DE
+.P
+This expression applies
+.B md5()
+to the password, then applies
+.B md5()
+to the result, 999 more times, for a total of 1000
+applications.
+The encoding rule applies at each step: each round
+receives the hex output of the previous round.
+.P
+With the
+.B _bin
+suffix, the raw bytes are chained instead:
+.DS
+.ft CW
+md5_bin^1000(pass)
+.ft R
+.DE
+.P
+The
+.B ^
+operator is syntactic sugar.
+The expression
+.ft CW
+md5^3(pass)
+.ft R
+is exactly equivalent to:
+.DS
+.ft CW
+md5(md5(md5(pass)))
+.ft R
+.DE
+.P
+The
+.B ^
+operator is limited to the case where the function is
+applied to its own output with no additional inputs mixed
+in per round.
+For schemes that mix salt, password, or other data at each
+iteration, the
+.B for
+loop is required.
+.H 2 "The for Loop"
+.P
+The
+.B for
+statement provides explicit iteration with a named loop
+variable, a start value, and an end value (inclusive):
+.DS
+.ft CW
+for \fIvar\fP = \fIstart\fP to \fIend\fP {
+    \fIbody\fP
+}
+.ft R
+.DE
+.P
+The loop variable is an integer that is incremented by
+one after each iteration of the body.
+The body is executed while the variable is less than or
+equal to the end value.
+.P
+The
+.B for
+loop is required for hash schemes where additional data
+is mixed into each iteration.
+The canonical example is PHPBB3 (phpass), which
+concatenates the previous hash result with the original
+password at each round:
+.DS
+.ft CW
+h = md5_bin(salt . pass)
+for i = 1 to 2047 {
+    h = md5_bin(h . pass)
+}
+hex(h)
+.ft R
+.DE
+.P
+This cannot be expressed with the
+.B ^
+operator because the loop body is not simply
+\(lqapply the function to its own output\(rq \(em
+it concatenates
+.B pass
+at each step.
+.P
+The initial assignment
+.ft CW
+h = md5_bin(salt . pass)
+.ft R
+is the first of 2048 total MD5 operations.
+The loop runs 2047 more iterations, each taking the
+binary output of the previous round, concatenating the
+password, and computing a new MD5.
+The final
+.ft CW
+hex(h)
+.ft R
+converts the last binary digest to hex for output.
+.H 2 "The if Statement"
+.P
+The
+.B if
+statement executes a block conditionally based on the
+result of a relational expression.
+.DS
+.ft CW
+if \fIexpr\fP \fIrelop\fP \fIexpr\fP {
+    \fIthen-body\fP
+} else {
+    \fIelse-body\fP
+}
+.ft R
+.DE
+.P
+The
+.B else
+clause is optional.
+The condition is a single relational test, not a chain
+of Boolean expressions; there are no
+.B and ,
+.B or ,
+or
+.B not
+operators on Booleans because hx has no Boolean type.
+The supported relops are
+.BR == ,
+.BR != ,
+.BR < ,
+.BR > ,
+.BR <= ,
+.BR >= .
+.P
+Comparison semantics are strict-typed:
+integer\(emversus\(eminteger compares signed magnitudes,
+string\(emversus\(emstring compares with
+.BR memcmp ,
+and a mixed integer/string comparison raises a runtime
+error rather than coercing.
+A comparison such as
+.ft CW
+length(pass) > 8
+.ft R
+works because both sides are integers;
+a comparison such as
+.ft CW
+cut(d, 4, 12) == fromhex("0c0c0c0c0c...")
+.ft R
+works because both sides are strings.
+.P
+The intended use of
+.B if
+is to drive
+.B emit()
+from a positive verification, so that the program
+prints something on a match and nothing otherwise:
+.DS
+.ft CW
+dk = pbkdf2_sha1_bin(utf16le(pass), fromhex(salt), iter, 48)
+pt = aes_cbc_decrypt_bin(cut(dk,0,32), cut(dk,32,16), fromhex(ct))
+if cut(pt,4,12) == fromhex("0c0c0c0c0c0c0c0c0c0c0c0c") { emit("ok") }
+.ft R
+.DE
+.P
+This pattern fits hash schemes whose verification step
+is a structural property of a decrypted value (Veeam
+VBK, Apple FileVault/APFS, certain WPA flavors)
+rather than a hash equality.
+The grammar requires the closing brace and the
+.B else
+keyword to appear on the same line; see
+.B "Statement Separators"
+in the Lexical Structure chapter.
+.H 1 "Compound Hash Expressions"
+.PF "'Compound Hash Expressions' \\\\nP'Waffle'"
+.P
+The power of hx lies in its ability to express arbitrary
+compositions of hash functions.
+A compound hash applies multiple functions in sequence,
+with the output of one becoming the input to the next,
+optionally concatenated with salt or other data.
+.H 2 "Simple Composition"
+.P
+Functions nest naturally:
+.DS
+.ft CW
+sha1(md5(pass))
+.ft R
+.DE
+.P
+This computes MD5(password) as a 32-character hex string,
+then computes SHA-1 of those 32 characters.
+The result is a 40-character hex string.
+It corresponds to mdxfind type
+.BR SHA1MD5PASS .
+.H 2 "Composition with Salt"
+.P
+Salt is introduced via concatenation:
+.DS
+.ft CW
+sha1(md5(pass) . salt)
+.ft R
+.DE
+.P
+This computes MD5(password) as hex, concatenates the salt,
+then computes SHA-1 of the combined string.
+It corresponds to mdxfind type
+.B SHA1MD5SALT
+(e587).
+.P
+The placement of salt relative to other components is
+significant.
+The following are all different computations:
+.DS
+.ft CW
+md5(pass . salt)       # password then salt
+md5(salt . pass)       # salt then password
+md5(salt . pass . salt)  # salt, password, salt
+.ft R
+.DE
+.P
+These correspond to mdxfind types
+.BR MD5PASSSALT ,
+.BR MD5SALTPASS ,
+and
+.B MD5SALTPASSSALT
+respectively.
+.H 2 "Binary Intermediates"
+.P
+When two hash functions are chained with a binary
+intermediate (the raw digest bytes rather than their
+hex encoding), the inner function uses the
+.B _bin
+suffix:
+.DS
+.ft CW
+sha1(md5_bin(pass))     # feed 16 raw bytes to SHA-1
+sha1(md5(pass))         # feed 32 hex chars to SHA-1
+.ft R
+.DE
+.P
+The first expression corresponds to mdxfind type
+.B SHA1MD5RAW
+(e641); the second to
+.B SHA1MD5PASS
+(e161).
+These produce different results and must not be confused.
+.P
+Binary intermediates are common in real-world hash schemes.
+MySQL's native password format uses:
+.DS
+.ft CW
+sha1(sha1_bin(pass))
+.ft R
+.DE
+.P
+Many LDAP SSHA schemes concatenate the raw hash with the
+salt before base64-encoding the result.
+The
+.B _bin
+suffix makes these compositions explicit and unambiguous.
+.H 2 "Constructing Output Formats"
+.P
+Some hash schemes have distinctive output formats that
+include type identifiers, salt values, and the encoded
+hash in a specific arrangement.
+hx expressions can construct these formats using string
+literal concatenation.
+.P
+PHPBB3 output format:
+.DS
+.ft CW
+"$H$9" . salt . phpass_encode(h)
+.ft R
+.DE
+.P
+A hypothetical format with a prefix and base64:
+.DS
+.ft CW
+"{SSHA}" . base64(sha1_bin(pass . salt) . salt)
+.ft R
+.DE
+.P
+These expressions produce the complete output string,
+including all formatting, ready for comparison against
+a hash file.
+.H 1 "Hashpipe Integration"
+.PF "'Hashpipe Integration' \\\\nP'Waffle'"
+.P
+hx is fully integrated into hashpipe. It has access
+to the full set of hash functions that hashpipe supports.
+.H 2 "Function Registration"
+.P
+At startup, when the
+.B \-X
+or
+.B \-F
+flag is present, hashpipe initializes its type registry
+(the same initialization used for normal hash verification)
+and then walks the registry to register each type as an
+hx function.
+.P
+For each hashpipe type that has a
+.I compute
+function and a positive hash length, a bridge entry is
+created in the hx function registry.
+The bridge entry stores a pointer to the hashpipe compute
+function and the digest size in bytes.
+When the hx VM executes a
+.B CALL
+instruction for a bridged function, it invokes the generic
+bridge wrapper, which:
+.AL
+.LI
+Extracts the input data from the hx value on the stack.
+.LI
+Calls the hashpipe compute function with the standard
+signature
+.ft CW
+(pass, passlen, salt, saltlen, dest).
+.ft R
+.LI
+Hex-encodes the digest (or returns raw binary if the
+.B _bin
+flag is set).
+.LI
+Stores the result in the arena and pushes it onto the
+hx stack.
+.LE
+.P
+This bridge mechanism means that adding a new hash function
+to hashpipe automatically makes it available in hx
+expressions, with no changes to the hx source code.
+.H 2 "Command-Line Interface"
+.P
+The following flags control hx mode in hashpipe:
+.TS
+box;
+l l.
+\fBFlag\fP	\fBMeaning\fP
+_
+\-X \fIexpr\fP	Evaluate hx expression
+\-F \fIfile\fP	Run hx script file
+\-p \fIpass\fP	Single password (otherwise stdin)
+\-s \fIsalt\fP	Salt value (shared with statfile flag)
+\-S \fIsalt2\fP	Second salt value
+\-P \fIpepper\fP	Pepper value
+\-u \fIuser\fP	User/userid value
+.TE
+.TB "hashpipe hx Mode Flags"
+.P
+The
+.B \-X
+and
+.B \-F
+flags are mutually exclusive.
+When either is present, hashpipe enters hx mode and
+does not perform its normal hash verification pipeline.
+.P
+The
+.B \-s
+flag serves double duty: in normal hashpipe mode it
+specifies the statistics file; in hx mode it provides
+the salt value.
+This dual use is intentional to minimize the number of
+new flags required.
+.H 2 "User-Defined Hash Types"
+.P
+An hx expression may be registered as a user-defined
+hash type for use in mdxfind and hashpipe, with no C code
+and no recompile.
+The expression is placed in a
+.B userdef.txt
+stanza file and selected in mdxfind with
+.B "\-m u<id>" ,
+producing matches labelled
+.B "USER_<name>xNN" .
+hashpipe loads the same file and identifies
+.B USER_*
+matches in pipe mode \(em a candidate line such as
+.DS
+.ft CW
+echo <digest>:<password> | hashpipe
+.ft R
+.DE
+reports the matching user type alongside any matching
+built-in type.
+The full stanza format, the
+.B "\-m u<id>"
+selector, the load-time advisories, and the v1 CPU and
+unsalted scope are documented in the mdxfind manual under
+"User-Defined Hash Types".
+.H 1 "Worked Examples"
+.PF "'Worked Examples' \\\\nP'Waffle'"
+.P
+The following examples demonstrate hx expressions for
+common hash schemes, with explanations of each step.
+All examples can be executed with
+.B "hashpipe \-X"
+and produce verifiably correct output.
+.H 2 "MD5 (e1)"
+.DS
+.ft CW
+$ hashpipe -X 'md5(pass)' -p password
+5f4dcc3b5aa765d61d8327deb882cf99
+.ft R
+.DE
+.P
+The simplest case.
+.B md5()
+computes the MD5 digest of the password and returns
+it as 32 lowercase hex characters.
+.H 2 "SHA-1 of MD5 with Salt (e587)"
+.DS
+.ft CW
+$ hashpipe -X 'sha1(md5(pass) . salt)' -p password -s test
+d9365e268de8b33a989c390ebaf3f12246b281da
+.ft R
+.DE
+.P
+Evaluation proceeds inside-out:
+.B md5(pass)
+produces the 32-character hex string
+.ft CW
+5f4dcc3b5aa765d61d8327deb882cf99\fR,
+.ft R
+which is concatenated with
+.B salt
+(\(lqtest\(rq) to form a 36-character string,
+which is then hashed with SHA-1.
+.H 2 "Triple MD5 (MD5x03)"
+.DS
+.ft CW
+$ hashpipe -X 'md5^3(pass)' -p password
+5a22e6c339c96c9c0513a46e44c39683
+.ft R
+.DE
+.P
+Equivalent to
+.ft CW
+md5(md5(md5(pass)))\fR.
+.ft R
+Each round hashes the 32-character hex output of the
+previous round.
+.H 2 "Truncated SHA-512 (Partial Match)"
+.DS
+.ft CW
+$ hashpipe -X 'cut(sha512(pass), 0, 32)' -p password
+b109f3bbbc244eb82441917ed06d618b
+.ft R
+.DE
+.P
+The full SHA-512 hex output is 128 characters.
+.B cut()
+extracts the first 32, producing the same string that
+mdxfind would match against a 32-character hex hash file
+when testing SHA-512 candidates.
+.H 2 "PHPBB3 / phpass"
+.DS
+.ft CW
+$ hashpipe -X 'h = md5_bin(salt . pass); \\
+    for i = 1 to 2047 { h = md5_bin(h . pass) }; \\
+    "$H$9" . salt . phpass_encode(h)' \\
+    -p password -s saltsalt
+$H$9saltsaltWxax0v4yfV8oT17RChGlx1
+.ft R
+.DE
+.P
+This is the complete PHPBB3 computation in a single
+expression.
+The
+.B $H$9
+prefix indicates the hash variant and iteration count
+(2\fISU\fP11\fR = 2048 iterations).
+The salt is concatenated literally.
+The final hash value is encoded with
+.B phpass_encode()
+using the itoa64 alphabet, not hex.
+.P
+Key observations:
+.BL
+.LI
+.B md5_bin()
+is used throughout because phpass chains raw binary
+digests, not hex strings.
+.LI
+The initial hash includes the salt:
+.ft CW
+md5_bin(salt . pass)\fR.
+.ft R
+.LI
+Each subsequent round concatenates the original password
+to the previous binary result:
+.ft CW
+md5_bin(h . pass)\fR.
+.ft R
+This is the pattern that requires a
+.B for
+loop rather than the
+.B ^
+operator.
+.LI
+The final
+.ft CW
+phpass_encode(h)
+.ft R
+produces 22 characters of itoa64-encoded output from the
+16-byte MD5 digest.
+.LE
+.H 2 "MySQL Native Password"
+.DS
+.ft CW
+$ hashpipe -X 'upper(sha1(sha1_bin(pass)))' -p password
+.ft R
+.DE
+.P
+MySQL's native password format is SHA-1 of the raw SHA-1
+digest, with uppercase hex output.
+The
+.B _bin
+suffix on the inner SHA-1 is critical: the outer SHA-1
+receives 20 raw bytes, not the 40-character hex string.
+.H 2 "HMAC-SHA1"
+.DS
+.ft CW
+$ hashpipe -X 'hmac_sha1(pass, salt)' -p key -s message
+2088df74d5f2146b48146caf4965377e9d0be3a4
+.ft R
+.DE
+.P
+The first argument is the HMAC key, the second is the
+message.
+The result is the 40-character hex encoding of the
+20-byte HMAC-SHA1 output.
+.H 2 "Base64-Encoded MD5"
+.DS
+.ft CW
+$ hashpipe -X 'base64(md5_bin(pass))' -p password
+X03MO1qnZdYdgyfeuILPmQ==
+.ft R
+.DE
+.P
+This produces the same output as
+.ft CW
+echo -n password | openssl md5 -binary | openssl base64\fR.
+.ft R
+The
+.B _bin
+suffix is essential: base64 encodes the raw 16-byte
+digest, not the 32-character hex string.
+.H 2 "Compound with String Literal"
+.DS
+.ft CW
+$ hashpipe -X 'md5("prefix" . pass . "$")' -p password
+.ft R
+.DE
+.P
+String literals can appear anywhere in a concatenation.
+This computes MD5 of the string
+\(lqprefixpassword$\(rq.
+.H 2 "Last N Characters of Password"
+.DS
+.ft CW
+$ hashpipe -X 'md5(cut(pass, \-6))' -p helloworld
+.ft R
+.DE
+.P
+.B cut()
+with a negative offset extracts from the end.
+This computes
+.ft CW
+md5("oworld")\fR.
+.ft R
+.H 1 "Debugging"
+.PF "'Debugging' \\\\nP'Waffle'"
+.P
+hx provides two diagnostic flags that expose the internal
+representation of a compiled program.
+.H 2 "AST Dump (\-d)"
+.P
+The
+.B \-d
+flag (standalone hx only) prints the abstract syntax tree
+to standard error:
+.DS
+.ft CW
+$ hx -d 'sha1(md5(pass) . salt)'
+BLOCK (1 stmts)
+  CALL sha1 (nargs=1)
+    CONCAT
+      CALL md5 (nargs=1)
+        VAR pass
+      VAR salt
+.ft R
+.DE
+.P
+The tree shows the nesting of function calls and the
+concatenation structure, matching the evaluation order.
+.H 2 "Bytecode Dump (\-b)"
+.P
+The
+.B \-b
+flag prints the compiled bytecode:
+.DS
+.ft CW
+$ hx -b 'sha1(md5(pass) . salt)'
+--- hx bytecode: 6 instructions, 4 vars, 0 strings ---
+  var[0] = pass
+  var[1] = salt
+  var[2] = salt2
+  var[3] = pepper
+    0  PUSH_VAR   0 (pass)
+    1  CALL       md5 nargs=1
+    2  PUSH_VAR   1 (salt)
+    3  CONCAT
+    4  CALL       sha1 nargs=1
+    5  HALT
+.ft R
+.DE
+.P
+The bytecode shows the flat instruction sequence that
+the VM executes.
+Arguments are pushed left to right, function calls consume
+their arguments and push the result.
+The variable slot assignments, string constant table, and
+instruction addresses are all visible.
+.H 1 "The Algorithm Catalog"
+.PF "'The Algorithm Catalog' \\\\nP'Waffle'"
+.P
+Every algorithm that mdxfind recognises is described by
+exactly one entry in the hx algorithm catalog.
+The catalog is presented as Appendix A
+.RB ( hx (8))
+and is published alongside this specification as
+.IR https://www.mdxfind.com/hx.pdf .
+Each entry consists of an
+.B eN
+type number, a short symbolic name, and the
+.I hx expression
+that defines the computation.
+.P
+The hx expression
+.I is
+the definition of the algorithm.
+The symbolic name is a mnemonic; the type number is a
+stable identifier used at the command line and in
+.B mdxfind
+output; the hx expression is the authoritative,
+machine-readable specification of what the algorithm
+computes.
+When a researcher asks \(lqwhat does
+.B e587
+mean?\(rq the answer is the hx expression
+.ft CW
+sha1(md5(pass) . salt)
+.ft R
+\(em not a paragraph of English prose.
+.H 2 "Catalog Stewardship"
+.P
+A single shared catalog binds the mdxfind family of tools
+together.
+.B mdxfind
+uses the catalog to assign type numbers and report matches.
+.B hashpipe
+uses the catalog to verify hashes and to evaluate ad-hoc
+expressions via the
+.B \-X
+flag.
+.B mdsplit
+uses the catalog to associate matched output with the
+correct symbolic name.
+A correction applied to a catalog entry is therefore a
+correction that propagates uniformly across every tool that
+consumes the catalog.
+.P
+The catalog is maintained as a plain-text troff document
+.RB ( hx (8))
+in the same source tree as this specification.
+When a discrepancy is identified between a catalog entry
+and the implementation in
+.BR mdxfind ,
+the entry is corrected in
+.BR hx (8)
+and republished.
+The expression text in the catalog is the canonical
+reference; the C implementation in
+.B mdxfind
+exists to compute the same result at higher throughput.
+.H 2 "From Catalog to Bytecode"
+.P
+The catalog is compiled to a bytecode representation
+at build time by the
+.B hx8_to_c
+tool, which parses
+.BR hx (8),
+emits a C source file
+.RB ( codegen/hx_specs_data.c )
+that contains the bytecode and metadata for every entry,
+and links it into both
+.B mdxfind
+and
+.BR hashpipe .
+.P
+The bytecode is the same instruction set described in
+Section 2.6: a flat array of
+.BR PUSH_VAR ,
+.BR PUSH_STR ,
+.BR CALL ,
+.BR CONCAT ,
+and the small number of control-flow opcodes that the
+language requires.
+A single VM implementation interprets the bytecode for
+every entry in the catalog.
+There is no per-algorithm C code in the hx runtime;
+adding a new algorithm to the catalog adds a new bytecode
+program, not a new function.
+.P
+The bytecode representation supports tooling beyond
+straight execution.
+A bytecode walker can identify duplicates and near-duplicates
+across the catalog, compute structural fingerprints for
+algorithm families, and serve as the input to alternative
+backends.
+.H 1 "Cross-Architecture Execution"
+.PF "'Cross-Architecture Execution' \\\\nP'Waffle'"
+.P
+The hx VM is platform-independent.
+The bytecode produced from a catalog entry runs identically
+on any CPU architecture that
+.B mdxfind
+or
+.B hashpipe
+supports: x86-64, ARM64, POWER, SPARC.
+Bit-for-bit reproducibility is a property of the language,
+not of any particular host.
+.P
+For algorithms eligible for GPU acceleration, the same
+bytecode also drives the GPU execution path.
+A backend-specific code emitter consumes the bytecode and
+produces kernel source for the target accelerator:
+OpenCL source for NVIDIA, AMD, and Intel devices, and
+Metal source for Apple Silicon GPUs.
+The emitted kernel computes the same expression that the
+CPU VM interprets; the two outputs are byte-exact for the
+same inputs.
+.P
+The user selects the algorithm by its
+.B eN
+number and the device by the
+.B \-G
+flag; the backend choice is transparent.
+The expression
+.ft CW
+sha1(md5(pass) . salt)
+.ft R
+\(em catalog entry
+.B e587
+\(em produces the same 40-character hex string whether the
+work runs on an x86-64 thread on a desktop, an ARM64 thread
+on Apple Silicon, an OpenCL workgroup on an NVIDIA GTX 1080,
+or a Metal threadgroup on an Apple M2 Max.
+.P
+This architecture has a specific consequence for catalog
+authors: an algorithm needs only one definition.
+The hx expression in
+.BR hx (8)
+is consumed by the CPU VM, by the OpenCL emitter, and by
+the Metal emitter.
+A correction to the expression takes effect on every
+backend on the next build.
+.H 1 "Tooling"
+.PF "'Tooling' \\\\nP'Waffle'"
+.P
+hx is supported by a small collection of host-side tools.
+.H 2 "hx8_to_c"
+.P
+.B hx8_to_c
+is the catalog compiler.
+It parses
+.BR hx (8),
+validates every expression against the grammar of
+Section 2.2 and the function registry of Section 3,
+and emits a C source file containing the bytecode,
+the variable slot map, the string constant table, and
+the metadata for each entry.
+The output is the single source of truth that
+.B mdxfind
+and
+.B hashpipe
+link against; both tools observe the same catalog and the
+same compiled bytecode.
+.P
+A typical invocation:
+.DS
+.ft CW
+hx8_to_c hx.8 > codegen/hx_specs_data.c
+.ft R
+.DE
+.P
+Diagnostics are written to standard error.
+If any entry fails to compile, the tool reports the
+.B eN
+number, the source line in
+.BR hx (8),
+and a description of the error; the offending entry must
+be corrected before the build can proceed.
+.H 2 "hashpipe \-X"
+.P
+The
+.B \-X
+flag to
+.B hashpipe
+accepts an hx expression on the command line, compiles it
+in process, and evaluates it for the supplied inputs.
+This is the recommended way to construct, debug, and
+verify hx expressions:
+.DS
+.ft CW
+hashpipe -X 'sha1(md5(pass) . salt)' -p password -s test
+.ft R
+.DE
+.P
+.B \-F
+takes the same role for multi-statement programs read
+from a file.
+Both flags accept the standard hashpipe input modes:
+a single password via
+.BR \-p ,
+a stream of passwords on standard input, or a wordlist
+file.
+.H 2 "hashpipe catalog smoke tests"
+.P
+.B hashpipe
+treats the catalog as a regression target.
+For every entry that has known test vectors, hashpipe can
+verify that the compiled bytecode produces the expected
+output for the documented inputs.
+This is the mechanism by which catalog drift is detected
+and corrected.
+.H 2 "Standalone hx interpreter"
+.P
+For language development and pedagogy, a standalone
+.B hx
+interpreter is provided.
+It reads a program from a file or the command line,
+compiles it, and runs it against inputs supplied on the
+command line.
+The
+.B \-d
+and
+.B \-b
+flags described in Section 7 dump the AST and the
+compiled bytecode respectively, exposing the internal
+representation for inspection.
+.PF "'Summary' \\\\nP'Waffle'"
+.H 1 "Summary"
+.P
+hx is a hash expression language designed for precision,
+clarity, and longevity.
+Its notation is unambiguous: the expression
+.ft CW
+sha1(md5(pass) . salt)
+.ft R
+means exactly one thing, and evaluating it produces
+exactly one result, which matches the output of
+.ft CW
+mdxfind \-m e587
+.R
+on every supported CPU and GPU.
+.P
+The language's deliberately limited scope \(em hash
+functions, concatenation, encoding, iteration, and
+simple control flow \(em is a strength, not a limitation.
+By constraining the domain, hx ensures that every
+expression is a complete, verifiable specification of
+a hash computation, suitable for documentation, for
+test vector generation, and for independent verification
+of results produced by high-performance tools.
+.P
+The algorithm catalog
+.RB ( hx (8),
+published as
+.IR https://www.mdxfind.com/hx.pdf )
+is the canonical reference for every type that
+.B mdxfind
+recognises.
+A catalog entry is its hx expression; the
+.B eN
+type number and the symbolic name are convenient
+identifiers, but the expression is the definition.
+The same expression drives the CPU VM in
+.B hashpipe ,
+the high-throughput implementations in
+.BR mdxfind ,
+and the GPU kernels emitted for OpenCL and Metal
+backends.
+.P
+Implementation source is published at
+.I https://github.com/Cynosureprime/mdxfind
+and
+.IR https://github.com/Cynosureprime/hashpipe .
+As the standard description format for hash computations,
+hx bridges the gap between the compressed type names
+used by mdxfind internally and the human-readable
+descriptions needed by researchers, documentation, and
+the broader security community.
