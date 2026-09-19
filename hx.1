@@ -11,7 +11,7 @@
 .ds HF 3 3 2 2 2 2 2
 .ds HP 16 14 12 12 12 12 12
 .nr Ej 1
-.PH "'hx Language'$Revision: 1.17 $'Specification'"
+.PH "'hx Language'$Revision: 1.18 $'Specification'"
 .PF "'Introduction' \\\\nP'Waffle'"
 .H 1 "Introduction"
 .P
@@ -44,6 +44,10 @@ the notation must be capable of expressing every hash type
 that mdxfind supports (approximately 1000 types as of 2026),
 as well as compositions that have not yet been assigned type
 numbers.
+A type whose stored value is not a digest is the exception.
+Where verification means decrypting and comparing rather than
+computing and comparing, the catalog entry names the
+construction in place of an expression.
 A user encountering a novel hash scheme should be able to
 describe it in hx without waiting for a new type to be added
 to mdxfind.
