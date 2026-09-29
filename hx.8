@@ -1096,6 +1096,13 @@ e1043	MD5-1xMD5SHA1pSHA1p	md5(md5(sha1(pass)) . sha1(pass))
 e1044	MD5-1xMD5SHA256pSHA256p	md5(md5(sha256(pass)) . sha256(pass))
 e1045	MD5-1xMD5SHA512pSHA512p	md5(md5(sha512(pass)) . sha512(pass))
 e1046	MD5-1xMD5MD5pMD5p	md5(md5(md5(pass)) . md5(pass))
+e1047	MD5-1xMD5pMD5SHA1p	md5(md5(pass) . md5(sha1(pass)))
+e1048	MD5-1xMD5pMD5SHA256p	md5(md5(pass) . md5(sha256(pass)))
+e1049	MD5-1xMD5pMD5SHA512p	md5(md5(pass) . md5(sha512(pass)))
+e1050	MD5SHA1revMD5	md5(sha1(rev(md5(pass))))
+e1051	MD5MD5RAWMD5PASS	md5(md5_bin(md5(pass) . pass))
+e1052	MD5MD5RAWMD5	md5(md5_bin(md5(pass)))
+e1053	MD5SHA1SHA1MD5MD5	md5(sha1(sha1(md5(md5(pass)))))
 .TE
 .SK
 .H 2 "Notes"
