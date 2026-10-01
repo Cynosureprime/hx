@@ -1103,6 +1103,9 @@ e1050	MD5SHA1revMD5	md5(sha1(rev(md5(pass))))
 e1051	MD5MD5RAWMD5PASS	md5(md5_bin(md5(pass) . pass))
 e1052	MD5MD5RAWMD5	md5(md5_bin(md5(pass)))
 e1053	MD5SHA1SHA1MD5MD5	md5(sha1(sha1(md5(md5(pass)))))
+e1054	SHA256MD5PASSSALT	sha256(md5(pass . salt))
+e1055	WATTPAD	hmac_sha256("d2e1a4c569e7018cc142e9cce755a964bd9b193d2d31f02d80bb589c959afd7e", sha1(salt) . pass)
+e1056	HMAC-SHA256-SHA1SALTPASS	hmac_sha256(salt2, sha1(salt) . pass)
 .TE
 .SK
 .H 2 "Notes"
