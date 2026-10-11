@@ -1108,6 +1108,7 @@ e1055	WATTPAD	hmac_sha256("d2e1a4c569e7018cc142e9cce755a964bd9b193d2d31f02d80bb5
 e1056	HMAC-SHA256-SHA1SALTPASS	hmac_sha256(salt2, sha1(salt) . pass)
 e1057	MD5SQL5MD5MD5	md5("*" . upper(sha1(sha1_bin(md5(md5(pass))))))
 e1058	MD5SQL5MD5MD5MD5	md5("*" . upper(sha1(sha1_bin(md5(md5(md5(pass)))))))
+e1059	BCRYPTMD5PASSSALT	bcrypt(md5(pass . salt2), salt, cost)
 .TE
 .SK
 .H 2 "Notes"
