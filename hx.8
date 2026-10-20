@@ -190,11 +190,26 @@ e179	MD5SHA256	md5(sha256(pass))
 e180	MD5SHA512	md5(sha512(pass))
 e181	SHA1PASSSHA1	sha1(pass . sha1(pass))
 e182	SHA1UC	sha1_uc(pass)
-e183	MD5HEXSALT	md5(pass . salt) \fI(Note [24])\fP
-e184	SHA1HEXSALT	sha1(pass . salt) \fI(Note [24])\fP
-e185	SHA256HEXSALT	sha256(pass . salt) \fI(Note [24])\fP
-e186	GOSTHEXSALT	gost(pass . salt) \fI(Note [24])\fP
-e187	HAV128HEXSALT	hav128(pass . salt) \fI(Note [24])\fP
+.\" ENUM e183: salt = hex2
+.\" ALSO e183: md5(md5(salt . pass) . salt)
+.\" ALSO e183: md5(md5(salt . pass) . ":" . salt . ":")
+e183	MD5HEXSALT	md5(md5(salt . pass) . ":" . salt) \fI(Note [24])\fP
+.\" ENUM e184: salt = hex2
+.\" ALSO e184: sha1(md5(salt . pass) . salt)
+.\" ALSO e184: sha1(md5(salt . pass) . ":" . salt . ":")
+e184	SHA1HEXSALT	sha1(md5(salt . pass) . ":" . salt) \fI(Note [24])\fP
+.\" ENUM e185: salt = hex2
+.\" ALSO e185: sha256(md5(salt . pass) . salt)
+.\" ALSO e185: sha256(md5(salt . pass) . ":" . salt . ":")
+e185	SHA256HEXSALT	sha256(md5(salt . pass) . ":" . salt) \fI(Note [24])\fP
+.\" ENUM e186: salt = hex2
+.\" ALSO e186: gost(md5(salt . pass) . salt)
+.\" ALSO e186: gost(md5(salt . pass) . ":" . salt . ":")
+e186	GOSTHEXSALT	gost(md5(salt . pass) . ":" . salt) \fI(Note [24])\fP
+.\" ENUM e187: salt = hex2
+.\" ALSO e187: hav128(md5(salt . pass) . salt)
+.\" ALSO e187: hav128(md5(salt . pass) . ":" . salt . ":")
+e187	HAV128HEXSALT	hav128(md5(salt . pass) . ":" . salt) \fI(Note [24])\fP
 e188	MD5SHA1MD5	md5(sha1(md5(pass)))
 e189	MD5SHA1MD5SHA1	md5(sha1(md5(sha1(pass))))
 e190	MD5SHA1MD5SHA1SHA1	md5(sha1(md5(sha1(sha1(pass)))))
@@ -271,18 +286,28 @@ e260	MD5USERIDMD5	md5(user . md5(pass))
 e261	MD5USERIDMD5MD5	md5(user . md5(md5(pass)))
 e262	MD5MD5UC	md5(upper(md5(pass)))
 e263	MD5USERnulPASS	md5(user . fromhex("00") . pass)
+.\" STEP e264: md5(pad(PREV))
 e264	RADMIN2	md5(pad(pass, 100))
 e265	MD5RADMIN2	md5(md5(pad(pass, 100)))
 e266	MD5RADMIN2SHA1	md5(md5(pad(sha1(pass), 100)))
+.\" STEP e267: md5(pad(PREV))
 e267	RADMIN2MD5	md5(pad(md5(pass), 100))
+.\" STEP e268: md5(pad(PREV))
 e268	RADMIN2MD5MD5	md5(pad(md5(md5(pass)), 100))
+.\" STEP e269: md5(pad(PREV))
 e269	RADMIN2MD5UC	md5(pad(upper(md5(pass)), 100))
+.\" STEP e270: md5(pad(PREV))
 e270	RADMIN2MD5SHA1	md5(pad(md5(sha1(pass)), 100))
+.\" STEP e271: md5(pad(PREV))
 e271	RADMIN2SHA1	md5(pad(sha1(pass), 100))
+.\" STEP e272: md5(pad(PREV))
 e272	RADMIN2SQL5-40	md5(pad(upper(sha1(sha1_bin(pass))), 100))
+.\" STEP e273: md5(pad(PREV))
 e273	RADMIN2BASE64	md5(pad(base64(pass), 100))
+.\" STEP e274: md5(pad(PREV))
 e274	RADMIN2SHA1MD5	md5(pad(sha1(md5(pass)), 100))
 e275	RADMIN2SQL3	md5(pad(mysql3(pass), 100))
+.\" STEP e276: md5(pad(PREV))
 e276	RADMIN2MD5MD5MD5	md5(pad(md5(md5(md5(pass))), 100))
 e277	MD5RADMIN2MD5	md5(md5(pad(md5(pass), 100)))
 e278	MD51SALTMD5	\fI(complex: iterates over single-char salts)\fP
@@ -365,7 +390,7 @@ e354	MD5CAPMD5USER	emit(md5(cap(md5(pass)) . user)) \fI(Note [24]; see Note [47]
 e355	MD5CAPMD5MD5USER	emit(md5(cap(md5(cap(md5(pass)))) . user)) \fI(Note [24]; see Note [47])\fP
 e356	MD5MD5MD5USER	emit(md5(md5(md5(pass)) . user)) \fI(Note [24]; see Note [47])\fP
 e357	MD5MD5SALT-SALT	md5(md5(pass . salt) . ":" . salt)
-e358	MD5CAPSHA1	md5(cap(sha1(pass)))
+e358	MD5CAPSHA1	md5(cap(sha1(pass), 0))
 e359	MD5SHA1MD5x	md5(sha1(md5^N(pass))) \fI(N = iteration count)\fP
 e360	MD5SHA1BASE64MD5RAW	md5(sha1(base64(md5_bin(pass))))
 e361	MD5SHA1MD5MD5SHA1	md5(sha1(md5(md5(sha1(pass)))))
@@ -390,7 +415,9 @@ e379	LM	lm(pass)
 e380	MD5LM	md5(lm(pass))
 e381	MD5LMUC	md5(upper(lm(pass)))
 e382	SHA256SHA256SALT	sha256(sha256(pass) . salt)
-e383	MD5RAWUC	hex(upper(md5_bin(pass)))
+.\" FIRSTITER e383: 2
+.\" STEP e383: md5(upper(PREV))
+e383	MD5RAWUC	md5(upper(hex(md5_bin^2(pass)))) \fI(no x01: it would be exactly MD5x01)\fP
 e384	MD5SHA1UCu32	md5(cut(upper(sha1(pass)), 0, 32))
 e385	SHA1SALTPASS	sha1(salt . pass)
 e386	SHA512PASSSALT	sha512(pass . salt) \fI(FileZilla Server >= 0.9.55)\fP
@@ -405,7 +432,7 @@ e394	MD5SALTPASS	md5(salt . pass)
 e395	SHA1SALTPASSSALT	sha1(salt . pass . salt)
 e396	MD5MD5UCSHA1MD5MD5	md5(upper(md5(sha1(md5(md5(pass))))))
 e397	MD5SHA256MD5	md5(sha256(md5(pass)))
-e398	SHA1lsb32	"00000000" . cut(sha1(pass), 8)
+e398	SHA1lsb32	"00000000" . cut(sha1(pass), 8, 24)
 e399	MD5-2xMD5UC	h=upper(md5(pass)); md5(h . h)
 e400	MD5-4xMD5	h=md5(pass); md5(h . h . h . h)
 e401	MD5-SHA1numSHA1	\fI(complex: iterates digits 1\(en9 as separator)\fP
@@ -511,7 +538,9 @@ e492	MD5revMD5SHA1SHA1	md5(rev(md5(sha1(sha1(pass)))))
 e493	MD5MD2	md5(md2(pass))
 e494	MD5MD2RAW	md5(md2_bin(pass))
 e495	MD5BASE64SHA256RAW	md5(base64(sha256_bin(pass)))
+.\" STEP e496: md4(utf16le(PREV))
 e496	MD4UTF16	md4(utf16le(pass))
+.\" STEP e497: md4(utf16le(PREV))
 e497	MD4UTF16MD5	md4(utf16le(md5(pass)))
 e498	RMD128MD4	rmd128(md4(pass))
 e499	MD5SHA0	md5(sha0(pass))
@@ -539,7 +568,9 @@ e520	SHA1SALTSHA1PASS	sha1(salt . sha1(pass))
 e521	SHA1SALTCX	\fIiterated SHA-1 with "--" delimiters \(em see Note [16]\fP
 e522	\s-2MD5SHA1MD5SHA1MD5SHA1MD5SHA1MD5SHA1MD5SHA1\s+2	md5(sha1(md5(sha1(md5(sha1(md5(sha1(md5(sha1(md5(sha1(pass))))))))))))
 e523	SHA256SALTSHA256PASS	sha256(salt . sha256(pass))
+.\" STEP e524: hex(wperm(md5_bin(PREV), 3, 2, 0, 1))
 e524	MD5dcab	hex(wperm(md5_bin(pass), 3, 2, 0, 1))
+.\" STEP e525: hex(wperm(md5_bin(PREV), 1, 2, 0, 3))
 e525	MD5bcad	hex(wperm(md5_bin(pass), 1, 2, 0, 3))
 e526	MD5BASE64BASE64	md5(base64(base64(pass)))
 e527	MD5BASE64BASE64BASE64	md5(base64(base64(base64(pass))))
@@ -554,6 +585,7 @@ e535	SHA1-CUSTOMUSERSALT	\fIXOR construction \(em see Note [25]\fP
 e536	PROGRESSENCODE	progress_encode(pass) \fI(Progress OpenEdge)\fP
 e537	PHPBB3MD5	\fIiterated MD5 with phpass encoding \(em see Note [17]\fP
 e538	SHA512CRYPTMD5	sha512crypt(md5(pass), salt)
+.\" STEP e539: sha1(sha1_bin(upper(sha1(md5(PREV)))))
 e539	MYSQL5MD5	sha1(sha1_bin(md5(pass)))
 e540	MANGOS	sha1(upper(user) . ":" . upper(pass)) \fI(Note [31])\fP
 e541	MD5revMD5SALT	md5(rev(md5(pass)) . salt)
@@ -563,9 +595,10 @@ e544	CRYPTEXT	\fIbyte-swapped SHA-1 with "Cryptext" tag \(em see Note [6]\fP
 e545	MD5SHA1lsb35	md5(hex(and(sha1_bin(pass), fromhex("00000fffffffffffffffffffffffffffffffffff"))))
 e546	MD5sub1-20MD5	md5(cut(md5(pass), 0, 20))
 e547	MD5sub1-20MD5MD5	md5(cut(md5(md5(pass)), 0, 20))
-e548	MD5SQL3SQL5MD5MD5	md5(md5(mysql3("*".upper(sha1(sha1_bin(pass))))))
+e548	MD5SQL3SQL5MD5MD5	md5(mysql3("*".upper(sha1(sha1_bin(md5(md5(pass)))))))
 e549	SHA1MD5SHA256	sha1(md5(sha256(pass)))
 e550	SHA1SHA256MD5	sha1(sha256(md5(pass)))
+.\" STEP e551: md4(utf16le(PREV))
 e551	MD4UTF16MD5MD5	md4(utf16le(md5^2(pass)))
 e552	MD5-2xSHA1MD5	h=sha1(md5(pass)); md5(h . h)
 e553	MD5-6xMD5	h=md5(pass); md5(h . h . h . h . h . h)
@@ -574,17 +607,29 @@ e555	MD5SHA1SALT	md5(sha1(pass) . salt)
 e556	MD5SHA1u39	md5(cut(sha1(pass), 0, 39))
 e557	MD5-MD5SHA1PASSSHA1MD5SALT	md5(md5(sha1(pass)) . sha1(md5(salt)))
 e558	MD5UCMD5	md5_uc(md5(pass))
+.\" STEP e559: md4(utf16le(PREV))
 e559	MD4UTF16MD5UC	md4(utf16le(upper(md5(pass))))
+.\" STEP e560: md4(utf16le(PREV))
 e560	MD4UTF16MD5MD5MD5	md4(utf16le(md5^3(pass)))
+.\" STEP e561: md4(utf16le(PREV))
 e561	MD4UTF16SHA1	md4(utf16le(sha1(pass)))
+.\" STEP e562: md4(utf16le(PREV))
 e562	MD4UTF16SHA1SHA1	md4(utf16le(sha1^2(pass)))
+.\" STEP e563: md4(utf16le(PREV))
 e563	MD4UTF16SHA256	md4(utf16le(sha256(pass)))
+.\" STEP e564: md4(utf16le(PREV))
 e564	MD4UTF16SHA256SHA256	md4(utf16le(sha256^2(pass)))
+.\" STEP e565: md4(utf16le(PREV))
 e565	MD4UTF16SHA256SHA256SHA256	md4(utf16le(sha256^3(pass)))
+.\" STEP e566: md4(utf16le(PREV))
 e566	\s-2MD4UTF16SHA256SHA256SHA256SHA256\s+2	md4(utf16le(sha256^4(pass)))
+.\" STEP e567: md4(utf16le(PREV))
 e567	MD4UTF16SHA1MD5	md4(utf16le(sha1(md5(pass))))
+.\" STEP e568: md4(utf16le(PREV))
 e568	MD4UTF16MD5SHA1	md4(utf16le(md5(sha1(pass))))
+.\" STEP e569: md4(utf16le(PREV))
 e569	MD4UTF16SHA256UC	md4(utf16le(upper(sha256(pass))))
+.\" STEP e570: upper(md4(utf16le(PREV)))
 e570	MD4UTF16UC	upper(md4(utf16le(pass))) \fI(Note [28])\fP
 e571	SHA1SHA256UC	sha1(upper(sha256(pass)))
 e572	MD5BASE64SHA1MD5	md5(base64(sha1(md5(pass))))
@@ -655,6 +700,7 @@ e636	SHA1SHA512TRUNC	sha1(cut(sha512(pass), 0, N)) \fI(N = 21\(en128; see Note [
 e637	SHA1-SHA512PASSSHA512SALT	sha1(sha512(pass) . sha512(salt))
 e638	SHA1SHA512TRUNC1SALT	sha1(cut(sha512(pass), 0, N) . salt) \fI(N = 21\(en128; salt is a generated single byte; see Note [24])\fP
 e639	SHA1SHA1PASS-TRUNC1SALT	sha1(sha1(sha1(pass) . cut(pass, 0, 3)) . salt) \fI(salt is a generated single byte; see Note [24])\fP
+.\" STEP e640: sha1(cut(PREV, 0, 32))
 e640	SHA1HAV128	sha1(hav128(pass))
 e641	SHA1MD5RAW	sha1(md5(md5_bin(pass)))
 e642	SHA1MD2	sha1(md2(pass))
@@ -727,6 +773,7 @@ e704	SHA1SALTMD5PASSMD5	sha1(salt . md5(pass . md5(pass)))
 e705	SHA1MD5sub8-24MD5	sha1(md5(cut(md5(pass), 8, 16)))
 e706	SHA1GOST	sha1(gost(pass))
 e707	MD4UTF16SHA256x	md4(utf16le(sha256^N(pass))) \fI(N = iteration count)\fP
+.\" STEP e708: md4(utf16le(PREV))
 e708	\s-2MD4UTF16SHA256SHA256SHA256SHA256SHA256\s+2	md4(utf16le(sha256^5(pass)))
 e709	SHA1MD5RAWUCMD5RAW	sha1(upper(hex(md5_bin^3(pass))))
 e710	SHA1SHA3-256TRUNC	sha1(cut(sha3_256(pass), 0, N)) \fI(N = 21\(en64; see Note [24])\fP
@@ -751,12 +798,13 @@ e728	SHA1UTF16BEZ	sha1(utf16be(pass) . fromhex("00"))
 e729	SHA1ZUTF16LE	sha1(fromhex("00") . utf16le(pass))
 e730	SHA1UCUTF16LE	sha1_uc(utf16le(pass))
 e731	SHA1MD5UC1LC	\fIuppercase MD5 hex with one alphabetic position lowercased \(em see Note [8]\fP
+.\" GUARD e732: utf7(pass)
 e732	SHA1UTF7	sha1(utf7(pass)) \fI(Note [9])\fP
 e733	SHA1MD51CAPMD5	emit(sha1(cap(md5^(i+1)(pass), P))) \fI(as e749, one extra md5)\fP
 e734	SHA1BASE64MD5	sha1(base64(md5(pass)))
 e735	SHA1SALTSHA1UCPASS	sha1(salt . upper(sha1(pass)))
 e736	SHA1MD5xSALT	sha1(md5^N(pass) . salt) \fI(N = iteration count)\fP
-e737	SHA1SHA11CAP	sha1(cap(sha1(pass)))
+e737	SHA1SHA11CAP	emit(sha1(cap(sha1(pass), N))) \fI(N = each lowercase position)\fP
 e738	SHA1SALTMD5SHA1PASS	sha1(salt . md5(sha1(pass)))
 e739	SHA1SHA1TRUNCSALT	sha1(cut(sha1(pass), 0, N) . salt) \fI(N = 21\(en40; see Note [24])\fP
 e740	SHA1-MD5SALT-CR	sha1(md5(md5(pass) . salt) . fromhex("0d"))
@@ -782,7 +830,7 @@ e757	SHA1SALTMD5UCMD5UC	sha1(salt . upper(md5(upper(md5(pass)))))
 e758	SHA1MD51CAPMD5MD5	emit(sha1(cap(md5^(i+2)(pass), P))) \fI(as e749, two extra md5)\fP
 e759	SHA1MD5SHA1PASSSALT	sha1(md5(sha1(pass) . salt))
 e760	SHA1SQL5MD5	sha1("*" . upper(sha1(sha1_bin(md5(pass))))) \fI(see Notes [1], [24])\fP
-e761	SHA1SQL5MD5MD5	sha1(md5("*" . upper(sha1(sha1_bin(md5(pass)))))) \fI(see Notes [1], [24])\fP
+e761	SHA1SQL5MD5MD5	sha1("*" . upper(sha1(sha1_bin(md5(md5(pass)))))) \fI(see Notes [1], [24])\fP
 e762	SHA1revSHA1	sha1(rev(sha1(pass)))
 e763	SHA11SALTMD5SHA256	\fIfive-variant single-byte salt search \(em see Note [10]\fP
 e764	SHA1SHA256MD5MD5	sha1(sha256(md5(md5(pass))))
@@ -796,22 +844,31 @@ e771	SHA1MD5sub1-16	sha1(cut(md5(pass), 0, 16))
 e772	SHA1MD5sub1-16MD5	sha1(cut(md5(md5(pass)), 0, 16))
 e773	SHA1MD5sub1-16MD5MD5	sha1(cut(md5(md5(md5(pass))), 0, 16))
 e774	SHA1SHA1sub1-16	sha1(cut(sha1(pass), 0, 16))
+.\" STEP e775: md4(utf16le(PREV))
 e775	MD4UTF16MD5MD5MD5MD5	md4(utf16le(md5^4(pass)))
+.\" STEP e776: md4(utf16le(PREV))
 e776	MD4UTF16SHA1UC	md4(utf16le(upper(sha1(pass))))
 e777	MD4UTF16MD5x	md4(utf16le(md5^N(pass))) \fI(N = iteration count)\fP
 e778	MD4UTF16SHA1x	md4(utf16le(sha1^N(pass))) \fI(N = iteration count)\fP
+.\" STEP e779: md4(utf16le(PREV))
 e779	MD4UTF16SHA256MD5	md4(utf16le(sha256(md5(pass))))
+.\" STEP e780: md4(utf16le(PREV))
 e780	MD4UTF16SHA256SHA1	md4(utf16le(sha256(sha1(pass))))
+.\" STEP e781: md4(utf16le(PREV))
 e781	MD4UTF16-2xMD5	md4(utf16le(md5(pass) . md5(pass)))
+.\" STEP e782: md4(utf16le(PREV))
 e782	MD4UTF16MD5PASSMD5SHA1PASS	md4(utf16le(md5(pass) . md5(sha1(pass))))
 e783	MD4UTF16MD5PASSMD5SALT	md4(utf16le(md5(pass) . md5(salt)))
 e784	MD4UTF16MD5MD5PASSMD5SALT	md4(utf16le(md5^2(pass) . md5(salt)))
 e785	MD4UTF16MD5PASSMD5SHA1SALT	md4(utf16le(md5(pass) . md5(cut(sha1(salt), 0, 32))))
 e786	NTLMH	md4(utf16le(pass)) \fI(Note [29])\fP
 e787	MD4UTF16SQL3	md4(utf16le(mysql3(pass)))
+.\" STEP e788: md4(utf16le(PREV))
 e788	MD4UTF16BASE64	md4(utf16le(base64(pass)))
+.\" STEP e789: md4(utf16le(PREV))
 e789	MD4UTF16revBASE64x	md4(utf16le(rev(base64(pass)))) \fI(N = iteration count)\fP
 e790	SHA1BASE64SHA256	sha1(base64(sha256(pass)))
+.\" STEP e791: md4(utf16le(PREV))
 e791	MD4UTF16BASE64SHA256	md4(utf16le(base64(sha256(pass))))
 e792	HMAC-MD5-KPASS	hmac_md5(salt, pass)
 e793	HMAC-SHA1-KPASS	hmac_sha1(salt, pass)
@@ -1109,6 +1166,8 @@ e1056	HMAC-SHA256-SHA1SALTPASS	hmac_sha256(salt2, sha1(salt) . pass)
 e1057	MD5SQL5MD5MD5	md5("*" . upper(sha1(sha1_bin(md5(md5(pass))))))
 e1058	MD5SQL5MD5MD5MD5	md5("*" . upper(sha1(sha1_bin(md5(md5(md5(pass)))))))
 e1059	BCRYPTMD5PASSSALT	bcrypt(md5(pass . salt2), salt, cost)
+e1060	MD5USERDESCRYPT	md5(user . descrypt(pass, salt))
+e1061	MD5CRYPTMD5	md5crypt(md5(pass), salt)
 .TE
 .SK
 .H 2 "Notes"
@@ -1438,23 +1497,34 @@ The hx primitive
 performs the UTF-7 conversion directly via iconv.
 .P
 .B "mdxfind quirk."
-The mdxfind compute path appends the literal character
+The mdxfind compute path once appended the literal character
 .B X
-to the password before iconv-converting to UTF-7, then drops
-the trailing converted byte from the result.
-This was added to work around an iconv bug where a UTF-7
-escape sequence at the end of the input would not be flushed
-without a following character.
-mdxfind also short-circuits the SHA-1 step when the UTF-7
+to the password before iconv-converting to UTF-7, then dropped
+the trailing converted byte from the result, to work around an
+iconv bug where a UTF-7 escape sequence at the end of the input
+would not be flushed without a following character.
+.B "That workaround is gone" :
+.B utf8_to_utf7
+flushes because it is told to, and it no longer writes into the
+candidate buffer.
+mdxfind short-circuits the SHA-1 step when the UTF-7
 output is the same as the input (i.e., when the password
 contains no characters that require UTF-7 escaping) on the
 grounds that the result would equal a plain SHA-1 hash and
 not contribute new information.
-.B "Neither workaround is reproduced in hx" :
+.B "The short-circuit is part of the type, not an optimisation."
 .B utf7()
-in hx works correctly for trailing-escape inputs and is used
-unconditionally regardless of whether the conversion changes
-the input.
+in hx is an encoder and applies unconditionally, which is right
+for the function; but a consumer that builds the type from the
+expression alone will hash every ASCII password as
+.B SHA1UTF7
+and produce digests mdxfind never emits \(em indistinguishable,
+in an index, from a plain SHA-1 under the wrong name.
+The condition is therefore declared machine-readably beside the
+row, as
+.BR "\&.\e\(dq GUARD e732: utf7(pass)" ,
+meaning: admit the word only where that expression differs from
+.BR pass .
 .P
 .B "Worked example."
 For the password
@@ -1966,16 +2036,41 @@ HAV128HEXSALT)
 iterates a single 2-hex-digit salt across all 256
 candidate bytes and, for each candidate, emits
 .B three
-digests:
+digests.
+The salt is PREFIXED to the password for the inner md5 \(em which
+is md5 for every member of the family, whatever the outer
+function H is \(em and the colon, where there is one, comes
+BEFORE the salt, not after:
 .DS
 .ft CW
-H(hex32(md5(pass)) . hex32(salt) . ":")
-H(hex32(md5(pass)) . hex32(salt))
-H(hex32(md5(pass)) . hex32(salt) . ":" . hex32(salt))
+H(md5(salt . pass) . ":" . salt)
+H(md5(salt . pass) . salt)
+H(md5(salt . pass) . ":" . salt . ":")
 .ft
 .DE
+Read from
+.B mdxfind.c
+at the JOB_MD5HEXSALT arm, where the three are
+.BR "linebuf, 35" ,
+.B "linebuf2, 34"
+and
+.BR "linebuf, 36"
+over a buffer holding the inner hex at 0, a colon at 32 and the
+salt at 33.
 The matching salt is reported as a 2-hex-digit value in
 the output.
+.P
+Because the type supplies its own salt, it is a function of the
+password alone and so is indexable, at 768 digests per word.
+The enumeration is declared machine-readably beside each row:
+.B "ENUM eN: salt = hex2"
+gives the domain, and an
+.B "ALSO eN:"
+line carries each shape beyond the first.
+A consumer that reads only the row expression would otherwise
+bind
+.B salt
+to nothing and compute a digest the family does not contain.
 .P
 The
 .B e687
