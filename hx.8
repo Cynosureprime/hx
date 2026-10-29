@@ -306,6 +306,7 @@ e272	RADMIN2SQL5-40	md5(pad(upper(sha1(sha1_bin(pass))), 100))
 e273	RADMIN2BASE64	md5(pad(base64(pass), 100))
 .\" STEP e274: md5(pad(PREV))
 e274	RADMIN2SHA1MD5	md5(pad(sha1(md5(pass)), 100))
+.\" STEP e275: md5(pad(PREV))
 e275	RADMIN2SQL3	md5(pad(mysql3(pass), 100))
 .\" STEP e276: md5(pad(PREV))
 e276	RADMIN2MD5MD5MD5	md5(pad(md5(md5(md5(pass))), 100))
@@ -395,10 +396,18 @@ e359	MD5SHA1MD5x	md5(sha1(md5^N(pass))) \fI(N = iteration count)\fP
 e360	MD5SHA1BASE64MD5RAW	md5(sha1(base64(md5_bin(pass))))
 e361	MD5SHA1MD5MD5SHA1	md5(sha1(md5(md5(sha1(pass)))))
 e362	MD5SHA1MD5UC	md5(sha1(upper(md5(pass))))
-e363	MD5MD5HUM	emit(md5(md5^N(pass) . S)) \fI(Note [24])\fP
-e364	SHA1MD5HUM	emit(sha1(md5^N(pass) . S)) \fI(Note [24])\fP
-e365	SHA1SHA1HUM	emit(sha1(sha1^N(pass) . S)) \fI(Note [24])\fP
-e366	MD5SHA1HUM	emit(md5(sha1^N(pass) . S)) \fI(Note [24])\fP
+.\" ENUM e363: salt = humsep
+.\" ALSO e363: md5(fromhex(salt) . md5(pass))
+e363	MD5MD5HUM	md5(md5(pass) . fromhex(salt)) \fI(Note [24])\fP
+.\" ENUM e364: salt = humsep
+.\" ALSO e364: sha1(fromhex(salt) . md5(pass))
+e364	SHA1MD5HUM	sha1(md5(pass) . fromhex(salt)) \fI(Note [24])\fP
+.\" ENUM e365: salt = humsep
+.\" ALSO e365: sha1(fromhex(salt) . sha1(pass))
+e365	SHA1SHA1HUM	sha1(sha1(pass) . fromhex(salt)) \fI(Note [24])\fP
+.\" ENUM e366: salt = humsep
+.\" ALSO e366: md5(fromhex(salt) . sha1(pass))
+e366	MD5SHA1HUM	md5(sha1(pass) . fromhex(salt)) \fI(Note [24])\fP
 e367	MD5-MD5SALTMD5PASS	md5(md5(salt) . md5(pass))
 e368	MD5NTLM	md5(md4(utf16le(pass)))
 e369	NTLM	md4(utf16le(pass)) \fI(Note [29])\fP
@@ -410,7 +419,9 @@ e374	MD5SHA1RADMIN2MD5	md5(sha1(md5(pad(md5(pass), 100))))
 e375	MD5UCBASE64MD5RAW	md5_uc(base64(md5_bin(pass))) \fI(Note [24])\fP
 e376	MD5UCBASE64SHA1RAW	md5_uc(base64(sha1_bin(pass))) \fI(Note [24])\fP
 e377	MD5SHA1MD5MD5UC	md5(sha1(md5(upper(md5(pass)))))
-e378	MD5SHA1MD5HUM	emit(md5(sha1(md5^N(pass) . S))) \fI(Note [24])\fP
+.\" ENUM e378: salt = humsep
+.\" ALSO e378: md5(sha1(fromhex(salt) . md5(pass)))
+e378	MD5SHA1MD5HUM	md5(sha1(md5(pass) . fromhex(salt))) \fI(Note [24])\fP
 e379	LM	lm(pass)
 e380	MD5LM	md5(lm(pass))
 e381	MD5LMUC	md5(upper(lm(pass)))
@@ -635,8 +646,12 @@ e571	SHA1SHA256UC	sha1(upper(sha256(pass)))
 e572	MD5BASE64SHA1MD5	md5(base64(sha1(md5(pass))))
 e573	SHA1DESCRYPT	sha1(descrypt(pass, salt))
 e574	MD4UTF16DESCRYPT	descrypt(md4(utf16le(pass)), salt)
-e575	MD4UTF16MD5HUM	emit(md4(utf16le(md5^N(pass) . S))) \fI(Note [24])\fP
-e576	MD4UTF16SHA1HUM	emit(md4(utf16le(sha1^N(pass) . S))) \fI(Note [24])\fP
+.\" ENUM e575: salt = humsep
+.\" ALSO e575: md4(utf16le(fromhex(salt) . md5(pass)))
+e575	MD4UTF16MD5HUM	md4(utf16le(md5(pass) . fromhex(salt))) \fI(Note [24])\fP
+.\" ENUM e576: salt = humsep
+.\" ALSO e576: md4(utf16le(fromhex(salt) . sha1(pass)))
+e576	MD4UTF16SHA1HUM	md4(utf16le(sha1(pass) . fromhex(salt))) \fI(Note [24])\fP
 e577	BCRYPT256	bcrypt(sha256(pass), salt, 12) \fI(Note [24])\fP
 e578	SHA1-MD5PASSSALT	sha1(md5(pass) . salt)
 e579	SHA1SHA1PASSSALT	sha1(sha1(pass) . salt)
@@ -862,6 +877,7 @@ e783	MD4UTF16MD5PASSMD5SALT	md4(utf16le(md5(pass) . md5(salt)))
 e784	MD4UTF16MD5MD5PASSMD5SALT	md4(utf16le(md5^2(pass) . md5(salt)))
 e785	MD4UTF16MD5PASSMD5SHA1SALT	md4(utf16le(md5(pass) . md5(cut(sha1(salt), 0, 32))))
 e786	NTLMH	md4(utf16le(pass)) \fI(Note [29])\fP
+.\" STEP e787: md4(utf16le(PREV))
 e787	MD4UTF16SQL3	md4(utf16le(mysql3(pass)))
 .\" STEP e788: md4(utf16le(PREV))
 e788	MD4UTF16BASE64	md4(utf16le(base64(pass)))
@@ -1168,6 +1184,7 @@ e1058	MD5SQL5MD5MD5MD5	md5("*" . upper(sha1(sha1_bin(md5(md5(md5(pass)))))))
 e1059	BCRYPTMD5PASSSALT	bcrypt(md5(pass . salt2), salt, cost)
 e1060	MD5USERDESCRYPT	md5(user . descrypt(pass, salt))
 e1061	MD5CRYPTMD5	md5crypt(md5(pass), salt)
+e1062	SHA256BASE64	sha256(base64(pass))
 .TE
 .SK
 .H 2 "Notes"
