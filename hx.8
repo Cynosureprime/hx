@@ -950,7 +950,7 @@ T}
 e851	MSSQL2005	sha1(utf16le(pass) . salt) \fI(MSSQL 2005)\fP
 e852	MSSQL2012	sha512(utf16le(pass) . salt) \fI(MSSQL 2012+)\fP
 e853	MACOSX	sha1(fromhex(salt) . pass) \fI(macOS 10.4\(en10.6; salt is hex-decoded)\fP
-e854	MACOSX7	pbkdf2_sha512(pass, salt, N, 128) \fI(macOS 10.7+)\fP
+e854	MACOSX7	sha512(fromhex(salt) . pass) \fI(macOS 10.7; 4-byte salt is hex-decoded and prefixes the stored digest)\fP
 e855	POSTGRESQL	md5(pass . user) \fI(PostgreSQL)\fP
 e856	JUNIPERSSG	juniper_encode(md5_bin(user . ":Administration Tools:" . pass))
 e857	SKYPE	md5(user . fromhex("0a") . "skyper" . fromhex("0a") . pass) \fI(Skype)\fP
@@ -983,10 +983,11 @@ e883	DOMINO6	domino6(pass, fromhex(salt))
 e884	SCRYPT	scrypt(pass, salt, N, r, p)
 e885	JUNIPERIVE	md5(salt . md5(pass)) \fI(Juniper IVE)\fP
 e886	PHPS	md5(salt . md5(pass)) \fI(PHPS)\fP
-e887	ARUBAOS	md5(salt . pass) \fI(ArubaOS \(em salt has vendor prefix)\fP
+e887	ARUBAOS	sha1(fromhex(salt) . pass) \fI(ArubaOS; 5-byte salt is hex-decoded and prefixes the stored digest)\fP
+.\" DEDUP_OK e887: same digest as e853 MACOSX, sha1(fromhex(salt) . pass); ARUBAOS salt is 5 bytes, not 4, and prefixes the stored form (hashcat 125 vs 122). Reviewed 2026-11-09.
 e888	ISCSI-CHAP	\fINote [34]\fP
-e889	WERKZEUG-MD5	pbkdf2_md5(pass, salt, N, 32) \fI(Werkzeug)\fP
-e890	WERKZEUG-SHA256	pbkdf2_sha256(pass, salt, N, 32) \fI(Werkzeug)\fP
+e889	WERKZEUG-MD5	hmac_md5(pass, salt) \fI(Werkzeug md5$salt$hash; HMAC keyed by the salt)\fP
+e890	WERKZEUG-SHA256	hmac_sha256(pass, salt) \fI(Werkzeug sha256$salt$hash; HMAC keyed by the salt)\fP
 e891	AUTHME	sha256(sha256(pass) . salt) \fI(AuthMe)\fP
 e892	NETWITNESS	\fI(RSA NetWitness authentication derivation)\fP
 e893	NETSCALER-SHA512	sha512(salt . pass . fromhex("00")) \fI(NetScaler; trailing NUL byte)\fP
