@@ -1186,6 +1186,7 @@ e1059	BCRYPTMD5PASSSALT	bcrypt(md5(pass . salt2), salt, cost)
 e1060	MD5USERDESCRYPT	md5(user . descrypt(pass, salt))
 e1061	MD5CRYPTMD5	md5crypt(md5(pass), salt)
 e1062	SHA256BASE64	sha256(base64(pass))
+e1063	SHA1PASSUSERPASSUSER	sha1(pass . user . pass . user)
 .TE
 .SK
 .H 2 "Notes"
