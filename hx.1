@@ -11,8 +11,8 @@
 .ds HF 3 3 2 2 2 2 2
 .ds HP 16 14 12 12 12 12 12
 .nr Ej 1
-.\" updated hx.8 13/11/2026
-.PH "'hx Language'$Revision: 1.26 $'Specification'"
+.\" updated hx.8 20/11/2026: cisco4_encode, rows e865 e907 e916 e980, Notes [52]-[54]
+.PH "'hx Language'$Revision: 1.29 $'Specification'"
 .PF "'Introduction' \\\\nP'Waffle'"
 .H 1 "Introduction"
 .P
@@ -863,7 +863,7 @@ hmac_sha512, \&...)
 T}	T{
 lowercase hex
 T}	T{
-\fChmac_sha256(k,m)\fP = 64 hex
+\fChmac_sha256(m,k)\fP = 64 hex
 T}
 _
 T{
@@ -1310,16 +1310,18 @@ This is more explicit: the uppercase encoding is a
 formatting operation, not a property of the hash function.
 .H 2 "HMAC Functions"
 .P
-HMAC functions take two arguments: the key and the message.
+HMAC functions take two arguments: the message, then the key.
 .DS
 .ft CW
-hmac_sha1(pass, salt)     # HMAC-SHA1, key=pass, msg=salt
+hmac_sha1(pass, salt)     # HMAC-SHA1, msg=pass, key=salt
 hmac_sha256(pass, salt)   # HMAC-SHA256
 .ft R
 .DE
 .P
-The convention follows the standard HMAC definition:
-the first argument is the key, the second is the message.
+The key is the second argument.
+This is the reverse of the HMAC(K, m) order of RFC 2104,
+so a construction written HMAC(K, m) in a specification is
+written hmac_x(m, K) in hx.
 .H 2 "String Transform Functions"
 .P
 Transform functions operate on strings without performing
@@ -1671,6 +1673,19 @@ The PIX password algorithm itself is
 followed by this encoding;
 .B cisco_pix_encode()
 covers only the encoding step.
+.H 3 "cisco4_encode()"
+.P
+The Base64 encoding used by Cisco IOS type 4 secrets.
+Each 3 input bytes become 4 characters, most significant
+bits first as in standard Base64, but in the alphabet
+.ft CW
+\&./0-9A-Za-z\fR
+.ft R
+and with no padding: a final 1 or 2 bytes give 2 or 3
+characters.
+A type 4 secret is
+.B "cisco4_encode(sha256_bin(pass))" ,
+43 characters.
 .H 3 "lotus64_encode()"
 .P
 The Lotus / Domino base64-style encoding used in the
@@ -1863,6 +1878,7 @@ The encoder-style primitives
 .BR lotus64_encode() ,
 .BR juniper_encode() ,
 .BR cisco_pix_encode() ,
+.BR cisco4_encode() ,
 .BR progress_encode() ,
 .BR besder_encode() ,
 .BR dahua_encode() )
@@ -2592,13 +2608,13 @@ receives 20 raw bytes, not the 40-character hex string.
 .H 2 "HMAC-SHA1"
 .DS
 .ft CW
-$ hashpipe -X 'hmac_sha1(pass, salt)' -p key -s message
+$ hashpipe -X 'hmac_sha1(pass, salt)' -p message -s key
 2088df74d5f2146b48146caf4965377e9d0be3a4
 .ft R
 .DE
 .P
-The first argument is the HMAC key, the second is the
-message.
+The first argument is the message, the second is the
+HMAC key.
 The result is the 40-character hex encoding of the
 20-byte HMAC-SHA1 output.
 .H 2 "Base64-Encoded MD5"
