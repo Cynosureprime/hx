@@ -1187,6 +1187,8 @@ e1060	MD5USERDESCRYPT	md5(user . descrypt(pass, salt))
 e1061	MD5CRYPTMD5	md5crypt(md5(pass), salt)
 e1062	SHA256BASE64	sha256(base64(pass))
 e1063	SHA1PASSUSERPASSUSER	sha1(pass . user . pass . user)
+e1064	MD5LMCOLONNTLMUC	md5(upper(lm(pass)) . ":" . upper(md4(utf16le(pass))))
+e1065	MD5-3xMD5UC	h=upper(md5(pass)); md5(h . h . h)
 .TE
 .SK
 .H 2 "Notes"
@@ -3745,3 +3747,416 @@ The final expression result is always emitted
 automatically;
 .B emit()
 is needed only for intermediate values.
+.H 1 "Appendix C: Encoding, Token and Group Names"
+.PF "'Appendix C' \\\\nP'Waffle'"
+.P
+This appendix lists every name that
+.BR convert() ,
+.BR valid() ,
+.B roundtrip()
+and
+.B charsets()
+accept (Section 4).
+It is the registry of hx itself: every name below is accepted, and
+any other is an unknown encoding, token or group (Section 4.3.3).
+Names are case-sensitive and are written in lowercase.
+The registry holds 155 names: 145 charsets, 8 transfer encodings and
+2 aliases.
+.P
+The groups column gives the
+.B charsets()
+groups a charset belongs to (Section 4.7.1).
+A group gains members as the registry grows, so this column
+describes this version of hx only.
+.H 2 "Unicode Encodings"
+.P
+Section 4.2.1.
+.na
+.TS H
+box, tab(|);
+lB lB lB
+lf(CW) lw(3.8i) lw(1.1i).
+Name|Description|charsets() groups
+_
+.TH
+utf8|UTF-8|all, unicode
+utf16le|T{
+UTF-16, low byte first, no byte-order mark
+T}|all, unicode
+utf16be|T{
+UTF-16, high byte first, no byte-order mark
+T}|all, unicode
+utf16|T{
+UTF-16 with a byte-order mark (FE FF written; FF FE or none read)
+T}|all, unicode
+utf32le|UTF-32, low byte first|all, unicode
+utf32be|UTF-32, high byte first|all, unicode
+utf32|UTF-32 with a byte-order mark|all, unicode
+cesu8|CESU-8 (UTR #26)|all, unicode
+utf7|UTF-7 (RFC 2152)|all, unicode
+lowbyte16|T{
+The low byte of each UTF-16 unit; encode only, never a source
+T}|none
+.TE
+.ad
+.TB "Unicode Encodings"
+.H 2 "Windows Code Pages"
+.P
+Windows 11's reading of each page (Sections 4.2.1 and 4.5).
+The number is written in decimal, without leading zeros.
+.na
+.TS H
+box, tab(|);
+lB lB lB
+lf(CW) lw(3.8i) lw(1.1i).
+Name|Description|charsets() groups
+_
+.TH
+cp37|T{
+EBCDIC, United States and Canada
+T}|all, ebcdic
+cp437|United States (OEM)|all, oem
+cp500|EBCDIC, International|all, ebcdic
+cp708|Arabic, ASMO 708 (OEM)|all, oem
+cp720|Arabic (OEM)|all, oem
+cp737|Greek (OEM)|all, oem
+cp775|Baltic (OEM)|all, oem
+cp850|Western European (OEM)|all, oem
+cp852|Central European (OEM)|all, oem
+cp855|Cyrillic (OEM)|all, oem
+cp857|Turkish (OEM)|all, oem
+cp858|T{
+Western European with the euro (OEM)
+T}|all, oem
+cp860|Portuguese (OEM)|all, oem
+cp861|Icelandic (OEM)|all, oem
+cp862|Hebrew (OEM)|all, oem
+cp863|French Canadian (OEM)|all, oem
+cp864|Arabic (OEM)|all, oem
+cp865|Nordic (OEM)|all, oem
+cp866|Russian (OEM)|all, oem
+cp869|Modern Greek (OEM)|all, oem
+cp874|Thai (ANSI)|all, windows
+cp875|EBCDIC, Greek|all, ebcdic
+cp932|T{
+Japanese, Shift-JIS (ANSI, double-byte)
+T}|all, windows, cjk
+cp936|T{
+Simplified Chinese, GBK (ANSI, double-byte)
+T}|all, windows, cjk
+cp949|T{
+Korean, UHC (ANSI, double-byte)
+T}|all, windows, cjk
+cp950|T{
+Traditional Chinese, Big5 (ANSI, double-byte)
+T}|all, windows, cjk
+cp1026|EBCDIC, Turkish|all, ebcdic
+cp1047|EBCDIC, Latin 1 (open systems)|all, ebcdic
+cp1140|T{
+EBCDIC, United States and Canada, with the euro
+T}|all, ebcdic
+cp1141|EBCDIC, Germany, with the euro|all, ebcdic
+cp1142|T{
+EBCDIC, Denmark and Norway, with the euro
+T}|all, ebcdic
+cp1143|T{
+EBCDIC, Finland and Sweden, with the euro
+T}|all, ebcdic
+cp1144|EBCDIC, Italy, with the euro|all, ebcdic
+cp1145|T{
+EBCDIC, Spain and Latin America, with the euro
+T}|all, ebcdic
+cp1146|T{
+EBCDIC, United Kingdom, with the euro
+T}|all, ebcdic
+cp1147|EBCDIC, France, with the euro|all, ebcdic
+cp1148|T{
+EBCDIC, International, with the euro
+T}|all, ebcdic
+cp1149|T{
+EBCDIC, Icelandic, with the euro
+T}|all, ebcdic
+cp1250|Central European (ANSI)|all, windows
+cp1251|Cyrillic (ANSI)|all, windows
+cp1252|Western European (ANSI)|all, windows
+cp1253|Greek (ANSI)|all, windows
+cp1254|Turkish (ANSI)|all, windows
+cp1255|Hebrew (ANSI)|all, windows
+cp1256|Arabic (ANSI)|all, windows
+cp1257|Baltic (ANSI)|all, windows
+cp1258|Vietnamese (ANSI)|all, windows
+cp1361|T{
+Korean, Johab (double-byte, not ANSI)
+T}|all, cjk
+cp10000|Macintosh Roman|all, mac
+cp10001|T{
+Macintosh Japanese (double-byte)
+T}|all, cjk
+cp10002|T{
+Macintosh Traditional Chinese (double-byte)
+T}|all, cjk
+cp10003|Macintosh Korean (double-byte)|all, cjk
+cp10004|Macintosh Arabic|all
+cp10005|Macintosh Hebrew|all
+cp10006|Macintosh Greek|all
+cp10007|Macintosh Cyrillic|all
+cp10008|T{
+Macintosh Simplified Chinese (double-byte)
+T}|all, cjk
+cp10010|Macintosh Romanian|all
+cp10017|Macintosh Ukrainian|all
+cp10021|Macintosh Thai|all
+cp10029|Macintosh Central European|all
+cp10079|Macintosh Icelandic|all
+cp10081|Macintosh Turkish|all
+cp10082|Macintosh Croatian|all
+cp20127|US-ASCII|all
+cp20866|Windows' KOI8-R|all
+cp21866|Windows' KOI8-U|all
+cp28591|Windows' ISO 8859-1|all
+cp28592|Windows' ISO 8859-2|all
+cp28593|Windows' ISO 8859-3|all
+cp28594|Windows' ISO 8859-4|all
+cp28595|Windows' ISO 8859-5|all
+cp28596|Windows' ISO 8859-6|all
+cp28597|Windows' ISO 8859-7|all
+cp28598|Windows' ISO 8859-8|all
+cp28599|Windows' ISO 8859-9|all
+cp28603|Windows' ISO 8859-13|all
+cp28605|Windows' ISO 8859-15|all
+.TE
+.ad
+.TB "Windows Code Pages"
+.H 2 "Published Single-Byte Tables"
+.P
+Section 4.2.1, Table \(lqPublished Single-Byte Tables\(rq.
+.na
+.TS H
+box, tab(|);
+lB lB lB
+lf(CW) lw(3.8i) lw(1.1i).
+Name|Description|charsets() groups
+_
+.TH
+latin1|ISO 8859-1|all, iso8859
+koi8r|KOI8-R (RFC 1489)|all
+koi8u|KOI8-U (RFC 2319)|all
+iso8859_2|T{
+ISO 8859-2, Latin-2, Central European
+T}|all, iso8859
+iso8859_3|T{
+ISO 8859-3, Latin-3, South European
+T}|all, iso8859
+iso8859_4|T{
+ISO 8859-4, Latin-4, North European
+T}|all, iso8859
+iso8859_5|ISO 8859-5, Cyrillic|all, iso8859
+iso8859_6|ISO 8859-6, Arabic|all, iso8859
+iso8859_7|ISO 8859-7, Greek|all, iso8859
+iso8859_8|ISO 8859-8, Hebrew|all, iso8859
+iso8859_9|ISO 8859-9, Latin-5, Turkish|all, iso8859
+iso8859_10|ISO 8859-10, Latin-6, Nordic|all, iso8859
+iso8859_11|ISO 8859-11, Thai|all, iso8859
+iso8859_13|ISO 8859-13, Latin-7, Baltic|all, iso8859
+iso8859_14|ISO 8859-14, Latin-8, Celtic|all, iso8859
+iso8859_15|T{
+ISO 8859-15, Latin-9, Western European with the euro
+T}|all, iso8859
+iso8859_16|T{
+ISO 8859-16, Latin-10, South-Eastern European
+T}|all, iso8859
+mac_roman|Apple Mac OS Roman|all, mac
+mac_cyrillic|Apple Mac OS Cyrillic|all, mac
+mac_greek|Apple Mac OS Greek|all, mac
+mac_turkish|Apple Mac OS Turkish|all, mac
+mac_centeuro|Apple Mac OS Central European|all, mac
+mac_icelandic|Apple Mac OS Icelandic|all, mac
+mac_croatian|Apple Mac OS Croatian|all, mac
+mac_romanian|Apple Mac OS Romanian|all, mac
+mac_arabic|Apple Mac OS Arabic|all, mac
+mac_hebrew|Apple Mac OS Hebrew|all, mac
+mac_thai|Apple Mac OS Thai|all, mac
+adobe_symbol|T{
+Adobe Symbol (Apple's SYMBOL.TXT)
+T}|all
+adobe_standard|Adobe StandardEncoding|all
+jis_x0201|T{
+JIS X 0201: JIS-Roman and halfwidth katakana
+T}|all, cjk
+kz1048|Kazakh, STRK1048-2002|all
+viscii|Vietnamese, VISCII (RFC 1456)|all
+hp_roman8|HP Roman-8|all
+dec_mcs|DEC Multinational|all
+atascii|Atari 8-bit ATASCII|all
+petscii|Commodore PETSCII, unshifted|all
+petscii_shifted|Commodore PETSCII, shifted|all
+ascii|US-ASCII (ANSI X3.4)|all
+cp864_ibmgraph|T{
+CP864 with 0x01\(en0x1F and 0x7F as the IBM PC glyphs of IBMGRAPH.TXT
+T}|all
+.TE
+.ad
+.TB "Published Single-Byte Tables"
+.H 2 "Multi-Byte and Other Charsets"
+.P
+Section 4.2.1.
+A name ending in
+.B _web
+is the WHATWG Encoding Standard's reading.
+.na
+.TS H
+box, tab(|);
+lB lB lB
+lf(CW) lw(3.8i) lw(1.1i).
+Name|Description|charsets() groups
+_
+.TH
+shift_jis|T{
+Shift_JIS, JIS X 0208:1997 Annex 1
+T}|all, cjk
+euc_jp|T{
+EUC-JP: JIS X 0208, JIS X 0201 katakana, JIS X 0212
+T}|all, cjk
+iso2022jp|ISO-2022-JP (RFC 1468)|all, cjk
+euc_kr|EUC-KR: KS X 1001|all, cjk
+gb2312|GB 2312 (EUC-CN)|all, cjk
+gb18030|GB 18030-2022|all, cjk
+euc_jp_c1|T{
+EUC-JP with 0x80\(en0x9F as the C1 controls
+T}|all, cjk
+euc_kr_c1|T{
+EUC-KR with 0x80\(en0x9F as the C1 controls
+T}|all, cjk
+shift_jis_web|Shift_JIS, Encoding Standard|all, cjk
+euc_jp_web|EUC-JP, Encoding Standard|all, cjk
+iso2022jp_web|ISO-2022-JP, Encoding Standard|all, cjk
+euc_kr_web|T{
+EUC-KR (UHC), Encoding Standard
+T}|all, cjk
+big5_web|T{
+Big5 (Big5-HKSCS), Encoding Standard
+T}|all, cjk
+gb18030_web|GB18030, Encoding Standard|all, cjk
+gbk_web|GBK, Encoding Standard|all, cjk
+gsm0338|T{
+GSM 03.38 default alphabet, one septet per byte (3GPP TS 23.038)
+T}|all
+t61|ITU-T T.61 (Teletex)|all
+.TE
+.ad
+.TB "Multi-Byte and Other Charsets"
+.H 2 "Transfer Encodings"
+.P
+Section 4.2.2.
+A transfer encoding pairs only with another transfer encoding.
+.na
+.TS H
+box, tab(|);
+lB lB
+lf(CW) lw(4.6i).
+Name|Description
+_
+.TH
+raw|The bytes themselves
+hex|Hexadecimal
+base64|Base64 (RFC 4648)
+base64url|T{
+Base64, URL-safe alphabet (RFC 4648 section 5)
+T}
+base32|Base32 (RFC 4648 section 6)
+crypt64|T{
+Crypt alphabet, least significant bits first (phpass, md5crypt)
+T}
+crypt64be|T{
+Crypt alphabet, most significant bits first (Cisco type 4)
+T}
+bcrypt64|bcrypt alphabet
+.TE
+.ad
+.TB "Transfer Encodings"
+.H 2 "Aliases"
+.P
+An alias is the same entry as its target, not a separate reading.
+It is not a member of any
+.B charsets()
+group.
+.na
+.TS H
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Alias|Same as
+_
+.TH
+gbk|cp936
+big5|cp950
+.TE
+.ad
+.TB "Aliases"
+.H 2 "Tokens"
+.P
+At most one token of each group is given per call.
+.B fffd
+is an ill-formed-source token, and for a UTF-16 source a lone-surrogate token.
+.na
+.TS H
+box, tab(|);
+lB lB lB
+lf(CW) l l.
+Token|Group|Section
+_
+.TH
+keep|ill-formed source|4.3.1
+null|ill-formed source|4.3.1
+latin1|ill-formed source|4.3.1
+fffd|ill-formed source|4.3.1
+q|lone surrogate|4.3.1
+cesu|lone surrogate|4.3.1
+strict|encode|4.3.1, 4.5.1
+bestfit|encode|4.3.1, 4.5.1
+default|unmappable|4.3.1, 4.5.6
+fail|unmappable|4.3.1, 4.5.6
+uc|hex case|4.3.1
+nopad|padding|4.3.1
+lenient|decode|4.3.1, 4.4.1
+glyphs|glyph|4.3.1
+lower|premap|4.3.2
+upper|premap|4.3.2
+rev|premap|4.3.2
+rot13|premap|4.3.2
+lower_win|premap|4.3.2
+upper_win|premap|4.3.2
+upper_oem|premap|4.3.2
+lower_full|premap|4.3.2
+upper_full|premap|4.3.2
+nfc|premap|4.3.2
+nfd|premap|4.3.2
+nfkc|premap|4.3.2
+nfkd|premap|4.3.2
+nfd_hfs|premap|4.3.2
+.TE
+.ad
+.TB "Tokens"
+.H 2 "charsets() Groups"
+.P
+Section 4.7.1.
+The counts are those of this version.
+.na
+.TS H
+box, tab(|);
+lB lB
+lf(CW) n.
+Group|Members
+_
+.TH
+all|144
+windows|14
+oem|18
+iso8859|15
+mac|12
+ebcdic|15
+cjk|25
+unicode|9
+.TE
+.ad
+.TB "charsets() Groups"

@@ -11,8 +11,8 @@
 .ds HF 3 3 2 2 2 2 2
 .ds HP 16 14 12 12 12 12 12
 .nr Ej 1
-.\" updated hx.8 20/11/2026: cisco4_encode, rows e865 e907 e916 e980, Notes [52]-[54]
-.PH "'hx Language'$Revision: 1.29 $'Specification'"
+.\" updated hx.8 21/11/2026: row e1065 MD5-3xMD5UC
+.PH "'hx Language'$Revision: 1.34 $'Specification'"
 .PF "'Introduction' \\\\nP'Waffle'"
 .H 1 "Introduction"
 .P
@@ -131,6 +131,9 @@ transform function such as
 The language itself is encoding-agnostic:
 a password is a sequence of bytes, and a hash function
 receives a sequence of bytes.
+Character-level processing and conversion between
+encodings are defined in the Text and Encodings chapter
+(Section 4).
 .SK
 .H 2 "Origin"
 .P
@@ -541,8 +544,11 @@ l l.
 \fIstmt\fP	\fIassignment\fP | \fIfor_stmt\fP | \fIif_stmt\fP | \fIexpr\fP
 \fIassignment\fP	\fBIDENT\fP \fB=\fP \fIexpr\fP
 \fIfor_stmt\fP	\fBfor\fP \fBIDENT\fP \fB=\fP \fIexpr\fP \fBto\fP \fIexpr\fP \fIblock\fP
+	| \fBfor\fP \fBIDENT\fP \fBin\fP \fIenc_list\fP \fIblock\fP
+\fIenc_list\fP	\fB(\fP \fBSTRING\fP { \fB,\fP \fBSTRING\fP } \fB)\fP
+	| \fBcharsets\fP \fB(\fP \fBSTRING\fP \fB)\fP
 \fIif_stmt\fP	\fBif\fP \fIcondition\fP \fIblock\fP [ \fBelse\fP \fIblock\fP ]
-\fIcondition\fP	\fIexpr\fP \fIrelop\fP \fIexpr\fP
+\fIcondition\fP	\fIexpr\fP \fIrelop\fP \fIexpr\fP | \fIexpr\fP
 \fIrelop\fP	\fB==\fP | \fB!=\fP | \fB<\fP | \fB>\fP | \fB<=\fP | \fB>=\fP
 \fIblock\fP	\fB{\fP \fIsep_opt stmt_list sep_opt\fP \fB}\fP
 \fIexpr\fP	\fIprimary\fP | \fIexpr\fP \fB.\fP \fIprimary\fP
@@ -573,9 +579,9 @@ hx has two value types:
 .B strings
 (byte sequences) and
 .BR integers .
-There is no Boolean type; conditions are evaluated by
-comparison operators that consume two values and branch
-accordingly.
+There is no Boolean type; a condition is a comparison that
+consumes two values and branches accordingly, or a single value,
+which is true when it is not empty.
 .P
 All hash function inputs and outputs are strings.
 A string is an arbitrary sequence of bytes with an
@@ -592,7 +598,7 @@ suffix on function names.
 Integers appear only in three contexts: iteration counts
 in the
 .B ^
-operator, loop bounds and loop variables in
+operator, loop bounds and loop variables in numeric
 .B for
 statements, and numeric arguments to functions such as
 .BR cut() .
@@ -837,6 +843,7 @@ The following table summarizes the canonical return form
 for each built-in family.
 All entries in this table are implemented as hx
 built-ins.
+.na
 .TS H
 expand allbox;
 lw(1.6i) | lw(1.5i) | lw(3.0i).
@@ -949,6 +956,7 @@ T}	\fCsevenzip(p,s)\fP
 _
 cmiyc	$cmiyc$...$	\fCcmiyc(p,s)\fP
 .TE
+.ad
 .TB "Default output form of each built-in family"
 .H 2 "Evaluation Model"
 .P
@@ -1060,6 +1068,7 @@ PUSH_STR	index	Push string constant
 PUSH_INT	value	Push integer
 STORE	slot	Pop stack top into variable
 CALL	entry, nargs, bin	Pop args, call function, push result
+CONVERT	from, to, policy, premap	Pop value, push its conversion (Section 4.3)
 CONCAT	\(em	Pop two values, push concatenation
 HALT	\(em	Stop; stack top is result
 JUMP	address	Unconditional jump
@@ -1118,11 +1127,11 @@ and the source line.
 the
 .B _bin
 suffix is applied to a function that is not a hash
-function or HMAC function (see Section 2.4.1).
+function or HMAC function (see Section 2.5.1).
 .LI
 .B "Syntax error" \(em
 the input does not conform to the grammar defined
-in Section 2.2.
+in Section 2.3.
 The error message should identify the source line
 and the unexpected token.
 .LE
@@ -1192,10 +1201,17 @@ or
 .B lower()
 to binary data (e.g., the output of a
 .B _bin
-function) operates on individual bytes using the
-C locale.
+function) operates on individual bytes and changes
+the ASCII letters only; no locale is consulted.
 Bytes that are not ASCII letters are passed through
 unchanged.
+This is defined behavior, not an error.
+.LI
+.B "Failed conversions" \(em
+a conversion that cannot be carried out, such as
+.B utf16le()
+of input that is not well-formed UTF-8, gives an empty
+result with exit status 0 (Section 4.3.4).
 This is defined behavior, not an error.
 .LE
 .H 2 "Program Structure"
@@ -1333,8 +1349,8 @@ l l l.
 _
 hex(x)	1	Encode bytes as lowercase hex
 fromhex(x)	1	Decode hex string to bytes
-upper(x)	1	Convert to uppercase
-lower(x)	1	Convert to lowercase
+upper(x)	1	Convert ASCII letters to uppercase
+lower(x)	1	Convert ASCII letters to lowercase
 rev(x)	1	Reverse byte sequence
 rotate(x, N)	2	Rotate string by N positions
 cap(x)	1	Capitalize first lowercase letter
@@ -1346,9 +1362,26 @@ and(a, b)	2	Byte-wise AND
 or(a, b)	2	Byte-wise OR
 wperm(x, w0, w1, ...)	2+	Permute 4-byte words
 bswap32(x)	1	Reverse bytes within each 4-byte group
+cut(x, start, len)	1\(en3	Substring, counted in bytes (Section 3.4.1)
 length(x)	1	Byte length (returns integer)
+ulength(x)	1	Character length (Section 4.1)
+ucut(x, start, len)	1\(en3	Substring, counted in characters (Section 4.1)
+utrunc(x, n)	2	First n characters (Section 4.1)
+ulower(x), uupper(x)	1	Unicode case mapping (Section 4.6)
+urev(x)	1	Reverse characters (Section 4.1)
 .TE
 .TB "String Transform Functions"
+.P
+.BR cut() ,
+.BR length() ,
+.BR upper() ,
+.B lower()
+and
+.B rev()
+work on bytes, and fold ASCII letters only; the
+.B u
+functions and the other character-level functions are defined in
+the Text and Encodings chapter (Section 4).
 .P
 The
 .B hex()
@@ -1525,7 +1558,10 @@ The
 .B cut()
 function extracts a substring, with semantics similar to
 the C library function
-.BR substr() .
+.BR substr() ,
+counted in bytes.
+.B ucut()
+(Section 4.1) counts characters instead.
 It accepts one, two, or three arguments:
 .TS
 box;
@@ -1534,7 +1570,7 @@ l l.
 _
 cut(x)	identity (returns x unchanged)
 cut(x, start)	from start to end of string
-cut(x, start, length)	length characters from start
+cut(x, start, length)	length bytes from start
 .TE
 .TB "cut() Function Forms"
 .P
@@ -1763,6 +1799,16 @@ which calls
 AS/400 password hashes
 .RB ( as400_des() ),
 and Domino-5 challenge mixing.
+.B as400_des(pass,\ user)
+upper-cases the userid, converts it to EBCDIC and pads it to 8
+bytes; a 9- or 10-character userid is folded into 8 bytes by
+spreading the bits of its ninth and tenth characters over all
+eight.
+The password's first 8 characters are the DES key; a 9- or
+10-character password makes a second key from characters 9 and
+10, and the hash is the exclusive-or of the two encryptions.
+A userid or password longer than 10 characters has no AS/400
+hash, and the result is null.
 .P
 .B aes_ecb_encrypt()
 encrypts a positive multiple of 16 bytes under
@@ -1843,7 +1889,7 @@ domino5(pass)	1	Lotus Domino 5 challenge mixer
 domino6(pass)	1	Lotus Domino 6 password hash (calls lotus64_encode)
 oracle7(user, pass)	2	Oracle 7 / 8 / 9 / 10 user-and-password DES chain
 sap_bcode(user, pass)	2	SAP CODVN B (BCODE) password digest
-as400_des(user, pass)	2	IBM AS/400 OS/400 DES-based password hash
+as400_des(pass, user)	2	IBM AS/400 DES password hash
 axcrypt(pass)	1	AxCrypt key-file mixing function
 racf_encrypt(user, pass)	2	IBM RACF DES-based password hash
 racf_kdfaes(pass, user, hdr, salt)	4	IBM RACF KDFAES (HMAC-SHA256 memory mixer)
@@ -1894,13 +1940,48 @@ l l l.
 _
 utf16le(x)	1	Convert UTF-8 to UTF-16 little-endian
 utf16be(x)	1	Convert UTF-8 to UTF-16 big-endian
-utf7(x)	1	Convert to UTF-7 encoding
+utf7(x)	1	Convert UTF-8 to UTF-7
 zext16(x)	1	Zero-extend each byte to 16 bits little-endian
-from_cp1252(x)	1	Convert UTF-8 to Windows-1252 (Latin-1 superset)
-from_cp1251(x)	1	Convert UTF-8 to Windows-1251 (Cyrillic)
-ebcdic(x)	1	Convert ASCII to IBM EBCDIC (CP037)
+from_cp1252(x)	1	Decode Windows-1252 bytes to UTF-8
+from_cp1251(x)	1	Decode Windows-1251 bytes to UTF-8
+ebcdic(x)	1	Convert ASCII to EBCDIC (not CP037; Section 4.2.1)
+convert(x, from, to, ...)	3+	Any conversion of the registry (Section 4.3)
+cp\fINNN\fP_to_utf8(x)	1	Decode a Windows code page to UTF-8 (Section 4.4)
+utf8_to_cp\fINNN\fP(x)	1	Encode UTF-8 in a code page, strict (Section 4.4)
+utf8_to_cp\fINNN\fP_bestfit(x)	1	The same, with Windows best fit (Section 4.5.1)
+latin1_to_utf8(x), utf8_to_latin1(x)	1	ISO-8859-1 (Section 4.4)
+koi8r_to_utf8(x), utf8_to_koi8r(x)	1	KOI8-R (Section 4.4); also koi8u
+from_utf16le(x), from_utf16be(x)	1	Decode UTF-16 to UTF-8; also _q, _cesu (Section 4.4)
+utf16_lowbyte(x)	1	Low byte of each UTF-16 unit (Section 4.4)
+nfc(x), nfd(x), nfkc(x), nfkd(x)	1	Unicode normalization (Section 4.6.2)
+nfd_hfs(x)	1	HFS+ decomposition (Section 4.6.2)
+lm_cp\fINNN\fP(x)	1	LM hash for an OEM code page (Section 4.5.5)
+valid(x, cs)	2	x is well-formed in cs (Section 4.7.2)
+roundtrip(x, a, b)	3	x survives a to b and back (Section 4.7.2)
+charsets(group)	1	A group of charsets, for a loop (Section 4.7.1)
 .TE
 .TB "Character Encoding Functions"
+.P
+.BR valid() ,
+.B roundtrip()
+and
+.B charsets()
+serve text programs, which try a password across many encodings
+(Section 4.7).
+The encoding arguments are string literals or the variable of a
+loop over encodings.
+.B charsets()
+is not a value:
+.DS
+.ft CW
+for cs in charsets("ebcdic") { emit("", cs) }
+.ft R
+.DE
+.P
+writes one line for each of the 15 EBCDIC pages, and
+.B charsets(\(dqwindows\(dq)
+anywhere else is the compile-time error
+.BR "charsets() can only follow 'in' in a for loop" .
 .P
 .B utf16le()
 is essential for NTLM and related Microsoft hash types,
@@ -1916,6 +1997,12 @@ The conversion handles full Unicode: multi-byte UTF-8
 sequences are properly decoded and re-encoded as
 UTF-16, including surrogate pairs for characters above
 U+FFFF.
+Input that is not well-formed UTF-8 gives an empty result, as it
+does for
+.B utf16be()
+and
+.B utf7()
+(Section 4.3.4).
 .P
 .B zext16()
 performs the same byte-level expansion as
@@ -1929,19 +2016,35 @@ UTF-16LE but in practice operate on the raw byte stream.
 .B from_cp1252()
 and
 .B from_cp1251()
-convert a UTF-8 string to the corresponding single-byte
-Windows code page.
-Characters that are not representable in the target code
-page are passed through as
-.B '?' .
-These conversions are required by hashes which were
-historically computed over the legacy single-byte
-encoding rather than UTF-8.
+are decoders: they read their input as bytes in the
+corresponding single-byte Windows code page and return the same
+text in UTF-8.
+Every byte decodes, as Windows' table says; an undefined CP1252
+byte such as 0x81 becomes U+0081.
+Applied to a UTF-8 password,
+.B from_cp1252()
+produces the common CP1252 mojibake.
+They are aliases of
+.B cp1252_to_utf8()
+and
+.BR cp1251_to_utf8() ;
+the encoders are
+.B utf8_to_cp1252()
+and
+.B utf8_to_cp1251()
+(Section 4.4).
 .P
 .B ebcdic()
-converts an ASCII string to IBM EBCDIC code page 037
-(the standard EBCDIC mapping used in z/OS RACF and
-related mainframe contexts).
+converts an ASCII string to EBCDIC as used in z/OS RACF and
+related mainframe contexts.
+It follows code page 037 except at
+.BR [ ,
+.B ]
+and
+.BR ^ ,
+and differs from it at 99 of the 256 byte values in all;
+.B cp37
+(Section 4.2.1) is IBM EBCDIC 037 itself.
 The companion EBCDIC variant CP1047 is used internally
 by
 .B racf_kdfaes()
@@ -2010,6 +2113,30 @@ This prevents raw binary from corrupting the output
 stream when
 .B _bin
 results are emitted.
+.P
+.BI emit( x ,\  label ,\ ...)
+writes the labels and then the value, separated by tabs, and writes
+a value that is not printable ASCII as
+.BR $HEX[...] .
+A label is a string literal or the variable of a loop over
+encodings (Section 4.7.3).
+An empty label writes nothing, not even its tab, so
+.B emit(\fIx\fP,\ \(dq\(dq)
+writes the value alone, in the labelled form:
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Expression|Output
+_
+emit(fromhex("0141"))|0141
+emit(fromhex("0141"), "l")|l	$HEX[0141]
+emit(fromhex("0141"), "")|$HEX[0141]
+emit(fromhex("0141"), "", "l")|l	$HEX[0141]
+.TE
+.ad
+.TB "emit() With and Without a Label"
 .SK
 .H 2 "Key Derivation Functions"
 .P
@@ -2058,6 +2185,3224 @@ parameters: time = iterations (default 3),
 mem_kb = memory in KB (default 65536),
 parallel = lanes (default 4),
 dklen = output length (default 32).
+.H 1 "Text and Encodings"
+.PF "'Text and Encodings' \\\\nP'Waffle'"
+.P
+A
+.I byte
+is an 8-bit value, 0x00 to 0xFF.
+Every hx value is a string of bytes, every hash function reads
+bytes, and the functions of Section 3 count, cut and fold bytes.
+.P
+.I Text
+is a sequence of
+.IR characters .
+ASCII, the base of nearly every encoding, has 128 characters
+(0x00\(en0x7F) and was made for American English: it has no
+accented letters, no other alphabet or script, and no currency
+sign but $.
+Character encodings exist to extend text past ASCII: to the
+letters and scripts of other languages, and to characters that
+belong to no language, such as mathematical symbols, the
+box-drawing characters of the IBM PC, and emoji.
+Code pages did this one language or region at a time.
+Unicode does it for all of them in one table: it gives each
+character a number, its
+.IR "code point" ,
+written U+ and four to six hex digits: U+0041 is A, U+00E9
+\(lq\[u00E9]\(rq, U+20AC \(lq\[u20AC]\(rq.
+A
+.I "character encoding"
+writes code points as bytes.
+Most text is in one of three kinds:
+.BL
+.LI
+A
+.I "code page"
+is a table that gives a character to each byte value, so it holds
+256 characters at most, chosen for one language or region.
+The bytes 0x00\(en0x7F are ASCII in nearly every code page; the
+exception is the EBCDIC pages of IBM mainframes.
+Each page puts its extension in the bytes 0x80\(en0xFF, so these
+differ from page to page: 0xE9 is
+\(lq\[u00E9]\(rq in CP1252 (Western European), U+0439 (Cyrillic
+short i) in CP1251, \(lq\[u0398]\(rq in CP437 (the IBM PC) and
+\(lq\[u03B9]\(rq in CP1253 (Greek).
+Chinese, Japanese and Korean have thousands of characters, so their
+code pages are double-byte: a lead byte of 0x81 or more and the
+trail byte after it are one character.
+Code pages are older than Unicode.
+Windows still uses them for text that is not Unicode: each Windows
+system has an
+.I ANSI
+code page, used by Windows programs, and an
+.I OEM
+code page, used by the console and by DOS programs, and its locale
+selects both (Section 4.5).
+KOI8-R, ISO-8859 and the Macintosh tables are code pages from
+other vendors and standards bodies.
+.LI
+.I UTF-8
+writes every code point in one to four bytes.
+An ASCII character is one byte, unchanged.
+Any other character is a lead byte, 0xC2\(en0xF4, followed by one
+to three continuation bytes, 0x80\(en0xBF.
+So a byte string is not always valid UTF-8 (Section 4.1).
+UTF-8 is the encoding of the web, of Unix and macOS, and of most
+current software.
+.LI
+.I UTF-16
+writes each code point as one 16-bit unit, or as two units (a
+.IR "surrogate pair" )
+above U+FFFF.
+A unit is two bytes, written low byte first in UTF-16LE and high
+byte first in UTF-16BE, so in UTF-16LE every ASCII character is
+followed by a zero byte.
+UTF-16 is the internal text format of Windows, Java, JavaScript and
+\&.NET.
+An NTLM hash is the MD4 of the password in UTF-16LE.
+.LE
+.P
+A character is one or more bytes, and the encoding decides how
+many bytes and which:
+.na
+.TS
+box, tab(|);
+lB lB lB lB
+l lf(CW) lf(CW) lf(CW).
+Character|CP1252|UTF-8|UTF-16LE
+_
+A|41|41|4100
+\[u00E9] U+00E9|e9|c3a9|e900
+\[u20AC] U+20AC|80|e282ac|ac20
+U+1F600|\(em|f09f9880|3dd800de
+.TE
+.ad
+.TB "One Character in Three Encodings"
+.P
+This matters because a hash function reads bytes, not characters.
+A password of ASCII characters has the same bytes in UTF-8 and in
+nearly every code page, so it gives the same digest whichever of
+them the site used.
+But in UTF-16LE it has a zero byte after each character, and a
+character outside ASCII has different bytes in different
+encodings.
+Each encoding of \(lq\[u00E9]\(rq gives a different digest:
+.na
+.TS
+box, tab(|);
+lB lB lB
+l lf(CW) lf(CW).
+Encoding|Bytes|MD5
+_
+UTF-8|c3a9|66ddcd97cfdeabb2f6fb8a999b4bc76f
+CP1252|e9|3406877694691ddd1dfb0aca54681407
+CP437|82|592eec8d32eb490e6919253d9ca6374d
+UTF-16LE|e900|ed71e8ffd3d8c47c1a2e22c53cd384aa
+.TE
+.ad
+.TB "\(lq\[u00E9]\(rq Hashed in Four Encodings"
+.P
+To verify or recover a password, hx must hash the bytes the site
+hashed, so it must know the site's encoding.
+An error in an encoding changes the bytes too.
+If a program writes text in one encoding and another program reads
+it in a different one, the characters change: the UTF-8 bytes
+c3a9, read as CP1252, are \(lq\[u00C3]\[u00A9]\(rq.
+Such text is called
+.IR mojibake ,
+and a site that hashed it hashed bytes that the user never typed.
+.P
+The length of a string in bytes equals its length in characters
+only in a single-byte encoding.
+.P
+Many hash schemes are defined over text: the application decodes
+the password into characters, processes the characters, and
+encodes the result to bytes before hashing it.
+This chapter defines how hx describes those steps:
+the character model, the registry of charsets and transfer
+encodings, the
+.B convert()
+function and its named aliases, the Windows conversion rules
+that the code-page conversions reproduce, and the Unicode data
+behind case mapping.
+.P
+Every conversion follows three rules.
+No result depends on the locale, the platform or the C library:
+each table is part of hx itself, so one expression gives the same
+bytes everywhere.
+Byte functions and character functions have different names:
+.B cut()
+counts bytes and
+.B ucut()
+counts characters (Section 4.1).
+And every function accepts every byte string; where a conversion
+cannot be carried out its result is the empty string
+(Section 4.3.4), never an error.
+.P
+In the tables of this chapter,
+.B Input
+is the password in hex, supplied as
+.ft CW
+hx \-p '$HEX[\fIhex\fP]'\fR,
+.ft R
+and
+.B Result
+is the hex of the expression's value, unless the caption says
+otherwise.
+\fI(empty)\fP is the zero-length result.
+Every result shown was produced by the hx interpreter.
+.H 2 "Characters and Bytes"
+.P
+.BR cut() ,
+.BR trunc() ,
+.B length()
+and
+.B rev()
+count and move bytes, and
+.B lower()
+and
+.B upper()
+change the ASCII letters A\(enZ and a\(enz only; they are byte
+functions.
+The registered types are defined in bytes:
+.B trunc(sha512(pass),\ 32)
+keeps 32 hex characters, which are 32 bytes.
+The character functions, named with a
+.B u
+prefix, count, move and fold characters.
+.P
+They read a string as a sequence of
+.I characters
+by the following model, scanning left to right:
+.BL
+.LI
+A well-formed UTF-8 sequence, as defined by Table 3-7 of the
+Unicode Standard, is one character.
+Overlong forms
+.RB ( "C0 80" ,
+.BR "E0 80 xx" ),
+encoded surrogates
+.RB ( "ED A0 80"
+to
+.BR "ED BF BF" )
+and anything above U+10FFFF are not well-formed.
+.LI
+Any other byte is one character on its own.
+The scan resumes at the next byte.
+.LE
+.P
+So text in a single-byte code page counts one character per byte,
+a truncated multi-byte sequence counts one character per byte,
+and an ASCII string behaves exactly as under the byte functions.
+Ill-formed bytes pass through every character function unchanged.
+No function replaces them with U+FFFD, because they are what the
+hash covers.
+.na
+.TS
+box, tab(|);
+lB lB lB
+l l l.
+Function|Arguments|Description
+_
+ulength(x)|1|Number of characters (returns integer)
+ucut(x)|1|Identity
+ucut(x, start)|2|Characters from \fIstart\fP to the end
+ucut(x, start, len)|3|\fIlen\fP characters from \fIstart\fP
+utrunc(x, n)|2|\f(CWucut(x, 0, n)\fP
+ulower(x), uupper(x)|1|Unicode 18.0.0 simple case mapping (Section 4.6)
+ulower_win(x), uupper_win(x)|1|Windows' standard case table (Section 4.5.4)
+ulower_full(x), uupper_full(x)|1|Unicode 18.0.0 full case mapping (Section 4.6)
+nfc(x), nfd(x), nfkc(x), nfkd(x)|1|Unicode 18.0.0 normalization (Section 4.6.2)
+nfd_hfs(x)|1|HFS+ decomposition (Section 4.6.2)
+urev(x)|1|Reverse the characters
+.TE
+.ad
+.TB "Character Functions"
+.P
+.B ucut()
+follows
+.BR cut() 's
+rules, counted in characters.
+.I start
+is zero-based; a negative
+.I start
+counts from the end and is clamped to 0 if it falls before the
+beginning; a
+.I start
+at or past the end gives an empty result; a length that runs past
+the end stops at the end; and a length of 0 or less gives an empty
+result.
+None of these is an error.
+The result is always a whole number of characters, so
+.B ucut()
+never splits a well-formed sequence.
+.P
+The difference shows on the three-character, six-byte string
+\(lq\[u00C9]\[u00E9]\[u00D1]\(rq:
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+c389c3a9c391|length(pass)|6 \fR(integer)\fP
+c389c3a9c391|ulength(pass)|3 \fR(integer)\fP
+c389c3a9c391|cut(pass, 0, 3)|c389c3
+c389c3a9c391|ucut(pass, 0, 2)|c389c3a9
+c389c3a9c391|lower(pass)|c389c3a9c391
+c389c3a9c391|ulower(pass)|c3a9c3a9c3b1
+c389c3a9c391|uupper(pass)|c389c389c391
+61c3a9|rev(pass)|a9c361
+61c3a9|urev(pass)|c3a961
+.TE
+.ad
+.TB "Byte and Character Functions Compared"
+.P
+.B "cut(pass, 0, 3)"
+splits \(lq\[u00E9]\(rq and keeps half of it;
+.B rev()
+turns \(lqa\[u00E9]\(rq into bytes that are not UTF-8.
+Ill-formed input is counted by the model above:
+.na
+.TS
+box, tab(|);
+lB lB lB lB
+lf(CW) l lf(CW) lf(CW).
+Input|Description|Expression|Result
+_
+41ff42|A, stray 0xFF, B|ulength(pass)|3
+41ff42|A, stray 0xFF, B|ulower(pass)|61ff62
+41ff42|A, stray 0xFF, B|urev(pass)|42ff41
+c080|overlong NUL|ulength(pass)|2
+41c3|A, truncated lead byte|ulength(pass)|2
+eda080|encoded surrogate|ulength(pass)|3
+f09f9880|U+1F600, four bytes|ulength(pass)|1
+.TE
+.ad
+.TB "Ill-Formed Input (ulength results are integers)"
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Expression|Result
+_
+ucut(pass, 2)|c3914142
+ucut(pass, 1, 2)|c3a9c391
+ucut(pass, \-2)|4142
+ucut(pass, \-2, 1)|41
+ucut(pass, 9)|\fI(empty)\fP
+ucut(pass, \-9, 2)|c389c3a9
+ucut(pass, 0, 0)|\fI(empty)\fP
+utrunc(pass, 3)|c389c3a9c391
+.TE
+.ad
+.TB "ucut() Forms (Input c389c3a9c3914142, \(lq\[u00C9]\[u00E9]\[u00D1]AB\(rq)"
+.H 2 "Charsets and Transfer Encodings"
+.P
+Conversions read and write the encodings of one registry, which
+holds two kinds of entry.
+A
+.I charset
+maps bytes to Unicode code points and back.
+A
+.I "transfer encoding"
+maps bytes to ASCII text and back, with no characters involved:
+hex, base64 and the crypt alphabets.
+The registry holds more than 100 charsets: the Unicode encodings,
+the Windows code pages, published tables from standards bodies
+and vendors, and the multi-byte charsets of Chinese, Japanese and
+Korean (together, CJK).
+This section describes them by family; Appendix C lists every
+name, with the tokens and the
+.B charsets()
+groups.
+.SK
+.H 3 "Charsets"
+.P
+The registry holds the charsets below and two aliases:
+.B gbk
+is
+.B cp936
+and
+.B big5
+is
+.BR cp950 .
+Each family reads one table, from the source that
+.B "hx \-V"
+names.
+.na
+.TS H
+box, tab(|);
+lB lB lB lB
+lw(1.2i)f(CW) lw(1.7i) lw(1.4i) lw(1.1i).
+Name|Decode|Encode|Table source
+_
+.TH
+utf8|T{
+Well-formed sequences (Section 4.1); ill-formed bytes by policy
+T}|UTF-8|Unicode
+T{
+utf16le,
+.br
+utf16be
+T}|T{
+A surrogate pair is one code point; lone surrogates and an odd final byte by policy
+T}|T{
+UTF-16, with surrogate pairs above U+FFFF; no byte-order mark
+T}|Unicode
+utf16|T{
+As \f(CWutf16le\fP after the mark FF FE, as \f(CWutf16be\fP otherwise
+T}|T{
+The mark FE FF, then UTF-16BE
+T}|Unicode
+T{
+utf32le,
+.br
+utf32be
+T}|T{
+Four bytes per code point; a surrogate, a value above U+10FFFF or a partial final unit is ill-formed
+T}|UTF-32|Unicode
+utf32|T{
+As \f(CWutf32le\fP after the mark FF FE 00 00, as \f(CWutf32be\fP otherwise
+T}|T{
+The mark 00 00 FE FF, then UTF-32BE
+T}|Unicode
+cesu8|T{
+A supplementary character is its surrogate pair, each unit in the three-byte form; a four-byte form or a lone surrogate is ill-formed
+T}|T{
+The same; NUL is 0x00
+T}|UTR #26
+utf7|T{
+Strict, below; ill-formed input by policy
+T}|T{
+Flushed; \f(CW~\fP, \f(CW\e\fP and Set O in base64
+T}|RFC 2152
+lowbyte16|\(em (encode only)|T{
+The low byte of each UTF-16 unit
+T}|T{
+JavaScript \f(CWcharCodeAt(i) & 0xFF\fP
+T}
+cp\fINNN\fP|T{
+Windows' rules, lenient or strict (Section 4.5.2)
+T}|T{
+Windows' rules, per UTF-16 unit, strict or best fit (Section 4.5)
+T}|T{
+Windows 11, dumped exhaustively; 78 pages
+T}
+T{
+\fRthe 40 published single-byte tables\fP
+T}|T{
+The table; a byte it does not define is ill-formed
+T}|T{
+The longest sequence the table has a byte for, per code point
+T}|T{
+Table \(lqPublished Single-Byte Tables\(rq
+T}
+shift_jis|T{
+JIS X 0208:1997 Annex 1: JIS-Roman, so 0x5C is \[u00A5] and 0x7E \[u203E], with \f(CW\e\fP at 0x815F
+T}|The same|T{
+SHIFTJIS.TXT (unicode.org)
+T}
+euc_jp|T{
+ASCII, JIS X 0208; 0x8E with the JIS X 0201 katakana, 0x8F with JIS X 0212
+T}|The same|T{
+JIS0208.TXT, JIS0212.TXT (unicode.org)
+T}
+iso2022jp|T{
+RFC 1468: \f(CWESC ( B\fP, \f(CWESC ( J\fP, \f(CWESC $ @\fP, \f(CWESC $ B\fP; the text ends in ASCII, and any other escape is ill-formed
+T}|The same|RFC 1468
+euc_kr|T{
+KS X 1001 only, with A2E6 \[u20AC], A2E7 \[u00AE] and A2E8 U+327E
+T}|The same|T{
+KSX1001.TXT (unicode.org); glibc EUC-KR for the three additions
+T}
+T{
+euc_jp_c1,
+.br
+euc_kr_c1
+T}|T{
+\f(CWeuc_jp\fP and \f(CWeuc_kr\fP with 0x80\(en0x9F as the C1 controls (in \f(CWeuc_jp_c1\fP, except the single shifts 0x8E and 0x8F)
+T}|The same|glibc iconv
+gb2312|T{
+The GB 2312 repertoire, mapped as GB 18030 maps it
+T}|The same|T{
+glibc GB2312; GB 18030-2022
+T}
+gb18030|T{
+GB 18030-2022: every scalar value has one code
+T}|The same|GB 18030-2022
+*_web|T{
+The Encoding Standard's decoder, in \f(CWshift_jis_web\fP, \f(CWeuc_jp_web\fP, \f(CWiso2022jp_web\fP, \f(CWeuc_kr_web\fP, \f(CWbig5_web\fP, \f(CWgb18030_web\fP and \f(CWgbk_web\fP
+T}|T{
+The Encoding Standard's encoder
+T}|T{
+WHATWG Encoding Standard
+T}
+gsm0338|T{
+One septet per byte; 0x1B leads the extension table, and an unknown escape is ill-formed
+T}|T{
+The same, unpacked
+T}|3GPP TS 23.038
+t61|T{
+An accent byte 0xC1\(en0xCF and the letter after it are one character; a lone accent, or an accent with a letter it has no form for, is ill-formed
+T}|The same|T{
+ITU-T T.61 (glibc T.61-8BIT)
+T}
+.TE
+.ad
+.TB "Charsets"
+.P
+The published single-byte tables are the single-byte charsets
+whose table comes from a standard or a vendor's published file,
+not from Windows' behavior:
+.na
+.TS
+box, tab(|);
+lB lB lB
+l lw(2.9i) lw(1.6i).
+Family|Names|Table source
+_
+ISO-8859|T{
+\f(CWlatin1\fP (part 1), \f(CWiso8859_2\fP \(en \f(CWiso8859_11\fP, \f(CWiso8859_13\fP \(en \f(CWiso8859_16\fP
+T}|T{
+ISO/IEC 8859 (unicode.org ISO8859/)
+T}
+KOI8|\f(CWkoi8r\fP, \f(CWkoi8u\fP|T{
+RFC 1489, RFC 2319 (unicode.org KOI8-R.TXT, KOI8-U.TXT)
+T}
+Macintosh|T{
+\f(CWmac_roman\fP, \f(CWmac_cyrillic\fP, \f(CWmac_greek\fP, \f(CWmac_turkish\fP, \f(CWmac_centeuro\fP, \f(CWmac_icelandic\fP, \f(CWmac_croatian\fP, \f(CWmac_romanian\fP, \f(CWmac_arabic\fP, \f(CWmac_hebrew\fP, \f(CWmac_thai\fP
+T}|T{
+Apple (unicode.org VENDORS/APPLE/)
+T}
+Adobe|T{
+\f(CWadobe_symbol\fP, \f(CWadobe_standard\fP
+T}|T{
+Apple's Symbol table; Adobe
+T}
+Japanese|\f(CWjis_x0201\fP|T{
+JIS X 0201 (unicode.org JIS0201.TXT)
+T}
+Kazakh|\f(CWkz1048\fP|STRK1048-2002
+Vietnamese|\f(CWviscii\fP|RFC 1456
+HP, DEC|\f(CWhp_roman8\fP, \f(CWdec_mcs\fP|RFC 1345
+Atari, Commodore|T{
+\f(CWatascii\fP, \f(CWpetscii\fP, \f(CWpetscii_shifted\fP
+T}|Unicode L2/19-025
+ASCII|\f(CWascii\fP|ANSI X3.4
+IBM PC|\f(CWcp864_ibmgraph\fP|T{
+CP864.TXT and IBMGRAPH.TXT (unicode.org)
+T}
+.TE
+.ad
+.TB "Published Single-Byte Tables"
+.P
+To
+.I decode
+a byte, hx looks it up in the table and reads the character the
+table gives; to
+.I encode
+a character, it looks the character up in the other direction and
+writes the byte.
+Most entries give one byte one code point.
+Some give a byte a
+.I sequence
+of code points, because the character the byte shows has no single
+code point in Unicode: in
+.BR mac_hebrew ,
+0x81 is the Yiddish ligature yod yod patah, U+05F2 followed by
+U+05B7.
+.P
+Unicode leaves the code points U+E000\(enU+F8FF, the
+.IR "private-use area" ,
+without characters, for vendors and applications to assign as
+they choose.
+Apple's tables use some of them as
+.IR "variant tags" :
+a tag after a character names one form of it.
+In
+.BR adobe_symbol ,
+0xD2 is \(lq\(rg\(rq (U+00AE) and 0xE2 is its sans-serif form,
+U+00AE followed by the tag U+F87F.
+A byte decodes to its whole sequence, tags included.
+.P
+Some entries also carry a
+.IR hint ,
+written in angle brackets, which says how the byte is displayed
+and is not a character.
+Apple's Arabic and Hebrew tables hold two copies of the space and
+of some punctuation: one marked
+.B <LR>
+for left-to-right text and one marked
+.B <RL>
+for right-to-left text.
+L2/19-025's Atari table marks with
+.B <RV>
+the bytes that show a character in reverse video, light on dark.
+hx drops the hint, so the two bytes of a pair decode to the same
+code point.
+.P
+The encoder writes the longest sequence the table has a byte for,
+so U+00AE followed by U+F87F encodes to 0xE2 and U+00AE alone to
+0xD2.
+Where several bytes carry one sequence, it takes the byte without
+an
+.B <RL>
+or
+.B <RV>
+hint, then the lowest byte.
+MacArabic has the space at 0x20 and, with
+.BR <RL> ,
+at 0xA0: both decode to U+0020, and U+0020 encodes to 0x20.
+.P
+The bytes 0x00\(en0x1F and 0x7F are the ASCII control characters:
+tab, line feed, carriage return and others that are not printed.
+0x00\(en0x1F are the
+.IR "C0 controls" ,
+and 0x7F is DEL.
+Apple's tables and JIS X 0201 leave them out, and they decode to
+themselves.
+.P
+A byte that the table does not define, such as 0xA5 in ISO 8859-3,
+is
+.IR ill-formed :
+it stands for no character.
+.B convert()
+takes tokens that select how an ill-formed byte is treated
+(Section 4.3.1), and the predicate
+.B valid()
+is true only when every byte is defined (Section 4.7.2).
+A table that defines every byte, such as
+.B latin1
+or
+.BR koi8r ,
+accepts these tokens too: they cannot change its decoding, so the
+compiler drops them, and the instruction is the same as with none.
+.P
+JIS X 0201 holds the Japanese katakana in single bytes,
+0xA1\(en0xDF.
+Unicode writes these as the
+.I halfwidth
+katakana, U+FF61\(enU+FF9F, separate from the ordinary katakana
+from U+30A1.
+.B jis_x0201
+follows JIS0201.TXT and decodes 0xB1 to the halfwidth U+FF71;
+glibc's JIS_X0201 decodes it to the ordinary U+30A2 and is not
+used.
+.P
+The IBM PC showed a picture, a
+.IR glyph ,
+for each control byte: 0x01 is a smiling face (U+263A).
+IBMGRAPH.TXT gives those pictures for CP864, the Arabic page, but
+Windows does not use them: even with
+.B MB_USEGLYPHCHARS
+it changes only 0x7F (Section 4.3.1).
+.B cp864_ibmgraph
+is CP864 as the IBM PC showed it: Microsoft's CP864.TXT, with
+0x01\(en0x1F and 0x7F from IBMGRAPH.TXT, 0x25 as
+.B %
+as Windows has it, and 0xA6, 0xA7 and 0xFF, which CP864.TXT does
+not define, ill-formed.
+.P
+A
+.I "multi-byte charset"
+writes a character as one or more bytes.
+In the double-byte charsets (Shift_JIS, EUC-JP, EUC-KR, GB 2312,
+GBK and Big5), a character outside ASCII is two bytes: a
+.IR "lead byte" ,
+from a range that the charset reserves for it, and a
+.I "trail byte"
+after it.
+The characters that share a lead byte make up one
+.I row
+of the table.
+GB 18030 also has four-byte codes, so that it can write every
+Unicode character.
+EUC-JP has two
+.IR "single shifts" :
+0x8E is followed by one JIS X 0201 katakana byte, and 0x8F by a
+two-byte JIS X 0212 character.
+ISO-2022-JP has no lead bytes.
+An
+.I "escape sequence"
+switches its character set: ESC (0x1B) and two bytes after it
+select ASCII
+.RB ( "ESC ( B" ),
+JIS-Roman
+.RB ( "ESC ( J" )
+or the two-byte JIS X 0208
+.RB ( "ESC $ @" ,
+.BR "ESC $ B" ),
+and the text must end in ASCII.
+.P
+The WHATWG
+.I "Encoding Standard"
+is the specification that web browsers follow for these charsets.
+It numbers the codes of each table with an index, the
+.IR pointer ,
+and it defines which bytes form one error.
+The standard and
+.B _web
+multi-byte charsets follow that error rule; the
+.BI cp NNN
+double-byte pages follow Windows instead (Section 4.5.2).
+A lead byte is any byte in the lead range, even when its row holds
+no character.
+If the byte after a lead is not ASCII and the two make no
+character, the two bytes are one ill-formed unit; if that byte is
+ASCII, the lead alone is the unit, and the ASCII byte is read again
+as a character of its own.
+Input that ends inside a GB 18030 four-byte code is one unit.
+In ISO-2022-JP, an escape sequence that is not one of the four is
+ill-formed at the ESC alone, and the bytes after it are read again
+as text, as the Standard's decoder does: 1B 28 41 is one
+ill-formed unit, then \(lq(\(rq and \(lqA\(rq.
+.BL
+.LI
+GB 2312 is the original Simplified Chinese standard, and GB 18030
+contains it.
+Two of its codes have two mappings in use: glibc's GB2312 maps
+0xA1A4 to U+30FB (katakana middle dot) and 0xA1AA to U+2015
+(horizontal bar), and GB 18030 maps them to U+00B7 (middle dot)
+and U+2014 (em dash).
+.B gb2312
+uses the GB 18030 mappings.
+.LI
+GB 18030-2005 mapped 18 characters that Unicode had not yet
+encoded to private-use code points.
+GB 18030-2022 maps their two-byte codes to the characters Unicode
+now has, and the private-use code points keep only their four-byte
+codes.
+.B gb18030
+is the Encoding Standard's algorithm, except that 0x80, which the
+Standard decodes as \[u20AC], is undefined, and 0xA3A0, which it
+decodes as U+3000, is the private-use U+E5E5.
+Every Unicode
+.I "scalar value"
+(every code point except the surrogates U+D800\(enU+DFFF) has
+exactly one code, and that code decodes back to it.
+The four-byte pointers 39420\(en188999 and those above 1237575 have
+no character and are ill-formed.
+.LI
+Big5 is the Traditional Chinese double-byte charset, and
+Big5-HKSCS adds the Hong Kong Supplementary Character Set to it.
+.B big5_web
+is Big5-HKSCS as the Encoding Standard defines it.
+Four of its codes decode to two code points, a letter and a
+combining mark: 0x8862 is \(lq\[u00CA]\(rq followed by U+0304
+(combining macron).
+.LI
+GBK is the two-byte part of GB 18030, the form that Windows uses
+as CP936.
+.B gbk_web
+has the decoder of
+.B gb18030_web
+and an encoder that writes \[u20AC] as 0x80 and has no four-byte
+codes.
+.LI
+UHC, Unified Hangul Code, is Microsoft's extension of EUC-KR
+(Windows CP949), which adds the 8,822 Hangul syllables that KS X
+1001 lacks.
+.B euc_kr_web
+is UHC.
+.LI
+EUC, Extended Unix Code, writes its two-byte codes with bytes
+0xA1\(en0xFE, so the bytes 0x80\(en0x9F are outside them, apart from
+EUC-JP's single shifts.
+ISO 6429 assigns those bytes to the
+.IR "C1 controls" ,
+U+0080\(enU+009F.
+The standard EUC forms leave the bytes undefined, as browsers,
+Java, Python, Perl and macOS iconv do.
+glibc's iconv and IBM's converters (ibm-33722, ibm-970) decode
+them as the C1 controls, and that reading is
+.B euc_jp_c1
+and
+.BR euc_kr_c1 .
+.B euc_kr_c1
+is all of glibc's EUC-KR; IBM's ibm-970 leaves out 0x8E and 0x8F.
+.B euc_jp_c1
+is all of glibc's EUC-JP except A1C0 and 8FA2B7, which glibc maps
+to the fullwidth U+FF3C and U+FF5E, and which keep the readings of
+.B euc_jp
+(\f(CW\e\fP and \f(CW\(ti\fP).
+No decoder reads GB 2312's 0x80\(en0x9F as C1, so
+.B gb2312
+has no C1 form.
+.LI
+GSM 03.38 is the 7-bit alphabet of SMS text messages.
+Each character is a
+.IR septet ,
+a 7-bit value, and 0x1B leads a character of the extension table:
+0x1B 0x65 is \[u20AC].
+.B gsm0338
+holds one septet in each byte.
+SMS packs eight septets into seven bytes; that
+.I "septet packing"
+is not part of the charset.
+0x09 is \(lq\[u00C7]\(rq (U+00C7), as 3GPP prints it, where
+unicode.org's GSM0338.TXT has \(lq\[u00E7]\(rq.
+.LI
+T.61, the Teletex character set, writes an accented letter as two
+bytes: an
+.I "accent byte"
+from 0xC1\(en0xCF, and the letter after it.
+0xC2 0x41 is \(lq\[u00C1]\(rq.
+An accent byte followed by a space is the accent alone, as a
+spacing character: 0xC2 0x20 is \(lq\[u00B4]\(rq (U+00B4).
+.LE
+.P
+UTF-7 writes Unicode in 7-bit bytes, for mail systems that carry
+only ASCII.
+RFC 2152 names two sets of characters that stand for themselves:
+.I "Set D"
+is the letters, the digits and
+.ft CW
+\(aq ( ) , \- . / : ?
+.ft R
+and
+.I "Set O"
+is
+.ft CW
+! " # $ % & * ; < = > @ [ ] \(ha _ \(ga { | }\fR.
+.ft R
+Any other character is written as its UTF-16 units in base64
+(Section 4.2.2), in a
+.I "base64 run"
+that begins with
+.BR + ;
+\f(CW+-\fP is the plus sign itself.
+.B utf7
+decodes as RFC 2152 defines.
+A base64 run ends at
+.BR \- ,
+which is absorbed, or at any other byte outside the base64
+alphabet, which is read as itself.
+The run is ill-formed if it holds no whole UTF-16 unit, if 6 or
+more bits are left over, if the bits left over are not zero, or if
+a surrogate is not paired.
+A byte outside Set D, Set O, SP, TAB, CR and LF is ill-formed,
+including
+.B \(ti
+and
+.BR \e .
+.P
+The code pages in the registry are:
+.na
+.TS
+box, tab(|);
+lB lB
+l lw(4.3i).
+Group|Code pages
+_
+ANSI, single-byte|T{
+874 (Thai), 1250 (Central European), 1251 (Cyrillic), 1252 (Western), 1253 (Greek), 1254 (Turkish), 1255 (Hebrew), 1256 (Arabic), 1257 (Baltic), 1258 (Vietnamese)
+T}
+ANSI, double-byte|T{
+932 (Japanese, Shift-JIS), 936 (Simplified Chinese, GBK), 949 (Korean, UHC), 950 (Traditional Chinese, Big5)
+T}
+Double-byte, not ANSI|1361 (Korean, Johab)
+OEM|T{
+437, 737, 775, 850, 852, 855, 857, 858, 860, 861, 862, 863, 864, 865, 866, 869; 708 (Arabic, ASMO 708), 720 (Arabic)
+T}
+KOI8|T{
+20866 (Windows' KOI8-R), 21866 (Windows' KOI8-U)
+T}
+ISO-8859|T{
+28591 (part 1), 28592\(en28599 (parts 2\(en9), 28603 (part 13), 28605 (part 15)
+T}
+EBCDIC|T{
+37, 500, 875 (Greek), 1026 (Turkish), 1047, 1140\(en1149 (the euro forms of 37 and the national pages)
+T}
+Macintosh|T{
+10000 (Roman), 10001 (Japanese), 10002 (Traditional Chinese), 10003 (Korean), 10004 (Arabic), 10005 (Hebrew), 10006 (Greek), 10007 (Cyrillic), 10008 (Simplified Chinese), 10010 (Romanian), 10017 (Ukrainian), 10021 (Thai), 10029 (Central European), 10079 (Icelandic), 10081 (Turkish), 10082 (Croatian)
+T}
+ASCII|20127 (US-ASCII)
+.TE
+.ad
+.TB "Code Pages"
+.P
+Each
+.BI cp NNN
+table is generated from what Windows 11 does, not from a
+published file.
+Every byte, and on a double-byte page every lead and trail
+pair, was decoded with
+.BR MultiByteToWideChar ,
+once with no flags and once with
+.BR MB_ERR_INVALID_CHARS ;
+every BMP code point other than a surrogate was encoded with
+.BR WideCharToMultiByte ,
+once with best fit and once with
+.BR WC_NO_BEST_FIT_CHARS ;
+and every byte of the 16 OEM pages and 720 was decoded again with
+.BR MB_USEGLYPHCHARS .
+These tables differ from Microsoft's published code-page files,
+chiefly in best fits for the spaces U+2000\(enU+200A, which
+the files omit.
+.P
+Where a standard and a Windows page both exist, they are separate
+readings under separate names:
+.B iso8859_7
+is ISO/IEC 8859-7 and
+.B cp28597
+is Windows' reading of it,
+.B mac_roman
+is Apple's table and
+.B cp10000
+Windows',
+.B euc_kr
+is KS X 1001 and
+.B cp949
+is Windows' UHC.
+A name ending in
+.B _web
+is the Encoding Standard's reading, which is what a browser sends.
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+a4|convert(pass, "iso8859_7", "utf8")|e282ac
+a4|convert(pass, "cp28597", "utf8")|ef9f82
+bd|convert(pass, "mac_roman", "utf8")|cea9
+bd|convert(pass, "cp10000", "utf8")|e284a6
+a0|convert(pass, "mac_arabic", "utf8")|20
+612062|convert(pass, "utf8", "mac_arabic")|612062
+aa|convert(pass, "cp1253", "utf8")|efa3b9
+aa|convert(pass, "cp1253", "utf8", "null")|\fI(empty)\fP
+8141|convert(pass, "cp949", "utf8")|eab082
+8141|convert(pass, "euc_kr_web", "utf8")|eab082
+8141|convert(pass, "euc_kr", "utf8", "fffd")|efbfbd41
+85|convert(pass, "euc_kr", "utf8", "fffd")|efbfbd
+85|convert(pass, "euc_kr_c1", "utf8")|c285
+5c|convert(pass, "shift_jis", "utf8")|c2a5
+5c|convert(pass, "shift_jis_web", "utf8")|5c
+5c|convert(pass, "utf8", "shift_jis")|815f
+a3a0|convert(pass, "gb18030", "utf8")|ee97a5
+a3a0|convert(pass, "gb18030_web", "utf8")|e38080
+e282ac|convert(pass, "utf8", "gbk_web")|80
+e282ac|convert(pass, "utf8", "gb18030")|a2e3
+8862|convert(pass, "big5_web", "utf8")|c38acc84
+41|convert(pass, "utf8", "utf16")|feff0041
+fffe000041000000|convert(pass, "utf32", "utf8")|41
+f09f9880|convert(pass, "utf8", "cesu8")|eda0bdedb880
+2b4a6a6f2d|convert(pass, "utf7", "utf8")|e298ba
+617e62|convert(pass, "utf7", "utf8", "null")|\fI(empty)\fP
+1b65|convert(pass, "gsm0338", "utf8")|e282ac
+c241|convert(pass, "t61", "utf8")|c381
+.TE
+.ad
+.TB "Standard and Windows Readings"
+.P
+CP1253 does not define 0xAA: the lenient decode gives Windows'
+private-use U+F8F9, and the strict decode
+.RB ( null )
+rejects it.
+.P
+The KOI8 and Latin-1 Windows pages and the tables of the same name
+are separate entries, and they differ:
+.BL
+.LI
+.B cp20866
+decodes exactly as
+.B koi8r
+on all 256 bytes.
+.B cp21866
+is not KOI8-U: at 0xAE and 0xBE it has U+045E and
+U+040E, where RFC 2319 has box-drawing characters.
+.LI
+.B latin1
+and
+.B cp28591
+decode identically, but
+.B latin1
+encodes per code point and
+.B cp28591
+per UTF-16 unit (Section 4.5.3), as every
+.BI cp NNN
+does.
+.B koi8r
+and
+.B koi8u
+also encode per code point.
+.LI
+.B koi8r
+and
+.B koi8u
+have no best fit; the Windows forms do.
+.LE
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+c1|koi8r_to_utf8(pass)|d0b0
+c1|cp20866_to_utf8(pass)|d0b0
+a4|koi8r_to_utf8(pass)|e29593
+a4|koi8u_to_utf8(pass)|d194
+ae|koi8u_to_utf8(pass)|e2959d
+ae|cp21866_to_utf8(pass)|d19e
+d196|utf8_to_koi8r(pass)|3f
+d196|utf8_to_koi8u(pass)|a6
+d19e|utf8_to_koi8u(pass)|3f
+d19e|utf8_to_cp21866(pass)|ae
+.TE
+.ad
+.TB "KOI8 and the Windows KOI8 Pages"
+.P
+.B ebcdic
+is not a charset name.
+The
+.B ebcdic()
+function (Section 3.8) is not code page 37: it differs from
+Windows' CP037 at 99 of the 256 byte values, three of them in
+ASCII
+.RB ( [ ,
+.BR ] ,
+.BR ^ ),
+and it maps 0x7E and 0xE5 to the same byte, so it has no
+inverse.
+Use
+.B cp37
+for IBM EBCDIC 037:
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+5b|ebcdic(pass)|ad
+5b|utf8_to_cp37(pass)|ba
+c1|cp37_to_utf8(pass)|41
+.TE
+.ad
+.TB "ebcdic() and CP037"
+.H 3 "Transfer Encodings"
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lw(2.6i) lw(2.4i).
+Name|Encode (bytes to text)|Decode (text to bytes)
+_
+raw|Identity|Identity
+hex|T{
+Lowercase hex; \f(CWuc\fP gives uppercase
+T}|T{
+Either case; null on an odd length or a non-hex character
+T}
+base64|T{
+RFC 4648, \f(CW=\fP padding; \f(CWnopad\fP drops it
+T}|T{
+Exactly what the encoder produces, padded or not; otherwise null
+T}
+base64url|T{
+RFC 4648 section 5 alphabet (\f(CW-\fP and \f(CW_\fP), padded; \f(CWnopad\fP drops it
+T}|The same
+base32|T{
+RFC 4648 section 6, padded; \f(CWnopad\fP drops it
+T}|The same
+crypt64|T{
+\f(CW./0-9A-Za-z\fP, least significant bits first, never padded (phpass, md5crypt)
+T}|The same
+crypt64be|T{
+\f(CW./0-9A-Za-z\fP, most significant bits first, never padded (Cisco type 4)
+T}|The same
+bcrypt64|T{
+\f(CW./A-Za-z0-9\fP, most significant bits first, never padded (bcrypt)
+T}|The same
+.TE
+.ad
+.TB "Transfer Encodings"
+.P
+A decoder other than
+.B hex
+accepts exactly what its encoder can produce, with or without the
+padding: the decoded bytes must encode back to the input.
+A character outside the alphabet, a misplaced
+.BR = ,
+a length the encoder cannot produce, or unused low bits that are
+not zero in the last character gives a null result
+(Section 4.3.4).
+The
+.B lenient
+token selects the decoding of
+.B fromhex()
+and
+.B frombase64()
+instead (Section 4.4.1).
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Expression|Value
+_
+convert("Hello", "raw", "hex")|48656c6c6f
+convert("Hello", "raw", "hex", "uc")|48656C6C6F
+convert("Hello", "raw", "base64")|SGVsbG8=
+convert("Hello", "raw", "base64", "nopad")|SGVsbG8
+convert(fromhex("fbff"), "raw", "base64")|+/8=
+convert(fromhex("fbff"), "raw", "base64url")|\-_8=
+convert("Hello", "raw", "base32")|JBSWY3DP
+convert("Hello", "raw", "crypt64")|6J4Pgx4
+convert("Hello", "raw", "crypt64be")|G4JgP4w
+convert("Hello", "raw", "bcrypt64")|QETqZE6
+convert("48656c6c6f", "hex", "base64")|SGVsbG8=
+convert("SGVsbG8=", "base64", "raw")|Hello
+convert("SGVsbG8", "base64", "raw")|Hello
+.TE
+.ad
+.TB "Transfer Encodings (Value is the text itself)"
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Expression|Result
+_
+convert("4A4a", "hex", "raw")|4a4a
+convert("4g", "hex", "raw")|\fI(empty)\fP
+convert("4g", "hex", "raw", "lenient")|40
+convert("414", "hex", "raw")|\fI(empty)\fP
+convert("414", "hex", "raw", "lenient")|41
+convert("QUI", "base64", "raw")|4142
+convert("QUJ", "base64", "raw")|\fI(empty)\fP
+convert("QUJ", "base64", "raw", "lenient")|4142
+convert("QU=D", "base64", "raw")|\fI(empty)\fP
+convert("QU=D", "base64", "raw", "lenient")|41
+.TE
+.ad
+.TB "Strict and Lenient Decoding"
+.P
+.B QUJ
+is null because its last character carries the bits 01 below the
+decoded bytes, which no encoder writes;
+.B QUI
+carries 00 and decodes.
+.SK
+.H 2 "convert()"
+.P
+.B convert()
+is the conversion instruction itself.
+Every function in the table of Section 4.4 is a name for one of
+its forms.
+.DS
+.ft CW
+convert(x, from, to)
+convert(x, from, to, token, ...)
+.ft R
+.DE
+.P
+.I from
+and
+.I to
+are string literals naming two registry entries of the same
+kind.
+Each further argument is a string literal holding one policy
+token or one premap token.
+Tokens may be given in any order, and at most one from each group.
+.P
+A conversion between transfer encodings is lossless: bytes encoded
+into hex, base64, base32 or a crypt alphabet decode back to the
+same bytes.
+A conversion between charsets is not, and it needs care.
+The character that a byte stands for depends on the charset, and
+the bytes do not say which charset wrote them, so the result is
+only as correct as the
+.I from
+that is named.
+A character the target cannot write is lost: it becomes a default
+character, a best fit or a null result.
+Input that is ill-formed in its charset is handled by policy, not
+repaired.
+Know the form of the input before writing the conversion: which
+charset wrote it, and whether another program changed it after it
+was written.
+.P
+.BR convert() ,
+nested and inside loops (Section 4.7), can describe very complex
+encodings, such as text that passed through several programs, each
+with its own code page.
+It is not a cure for every encoding problem.
+Apart from a premap or a best fit, it changes how characters are
+written, never which characters they are: it does not translate
+text from one language or script into another, and it does not
+transliterate.
+It does not find the encoding of its input; it does what the
+expression says.
+And it cannot correct bad input.
+A wrong conversion that lost nothing, such as UTF-8 read as CP1252,
+can be reversed (Section 4.4), but characters that were truncated
+or replaced with
+.B ?
+or U+FFFD are gone, and no conversion restores them.
+Each conversion has been tested exhaustively against its source
+(Section 4.8), but some inputs cannot be converted, and for those
+the result is null (Section 4.3.4).
+.P
+Between two charsets,
+.B convert()
+decodes
+.I x
+from
+.I from
+into code points, applies the premap, and encodes the code points
+into
+.IR to .
+Any pair is meaningful, including pairs that no named function
+covers:
+.B convert(pass,\ \(dqcp437\(dq,\ \(dqcp1252\(dq)
+re-encodes CP437 text in CP1252.
+Between two transfer encodings it decodes
+.I from
+to bytes, applies the premap to the bytes, and encodes
+.IR to ,
+so
+.B convert(h,\ \(dqhex\(dq,\ \(dqbase64\(dq)
+turns a hex digest into its base64 form.
+A charset and a transfer encoding cannot be mixed in one call:
+a charset reads text and a transfer encoding reads bytes, so the
+meaning of the pair would be a guess.
+Nest the calls instead:
+.DS
+.ft CW
+convert(convert(pass, "utf8", "utf16le"), "raw", "base64")
+.ft R
+.DE
+.P
+.B "hx \-b"
+prints the instruction with its operands, for example
+.DS
+.ft CW
+CONVERT    convert utf8->cp437 [bestfit,fail] premap=upper_oem
+.ft R
+.DE
+.H 3 "Policy Tokens"
+.P
+A policy token says what happens to input the decoder cannot
+read, to output the encoder cannot write, and to lone surrogates.
+Without a token, the group's default (listed first) applies.
+.na
+.TS H
+box, tab(|);
+lB lB lB lB
+lw(0.9i) lf(CW) lw(1.0i) lw(3.1i).
+Group|Tokens|Applies to|Meaning
+_
+.TH
+ill-formed source|T{
+keep
+.br
+null
+.br
+latin1
+.br
+fffd
+T}|T{
+\f(CWutf8\fP, \f(CWutf32*\fP, \f(CWcesu8\fP, \f(CWutf7\fP, the published single-byte tables, the multi-byte charsets, \f(CWgsm0338\fP, \f(CWt61\fP source
+T}|T{
+\f(CWkeep\fP: the ill-formed unit is a character on its own (Section 4.1); a \f(CWutf8\fP target writes its bytes unchanged, and any other target treats it as unmappable.
+.br
+\f(CWnull\fP: the whole result is null.
+.br
+\f(CWlatin1\fP: each byte of the unit is read as U+00NN.
+.br
+\f(CWfffd\fP: the unit is read as one U+FFFD.
+T}
+\^|T{
+keep
+.br
+null
+T}|\f(CWcp\fINNN\fR source|T{
+\f(CWkeep\fP: \fBMultiByteToWideChar\fP with no flags; every byte decodes (Section 4.5.2).
+.br
+\f(CWnull\fP: \fBMultiByteToWideChar\fP with \fBMB_ERR_INVALID_CHARS\fP; a byte or pair Windows rejects makes the whole result null.
+T}
+_
+glyph|glyphs|T{
+OEM \f(CWcp\fINNN\fR source: the 16 OEM pages and 720
+T}|T{
+0x01\(en0x1F and 0x7F decode to the characters their glyphs show (0x01 is U+263A, white smiling face), as \fBMB_USEGLYPHCHARS\fP does. On cp864 Windows changes only 0x7F; the IBM PC glyphs of IBMGRAPH.TXT are \f(CWcp864_ibmgraph\fP. Without the token these bytes are the controls.
+T}
+_
+lone surrogate|T{
+fffd
+.br
+q
+.br
+cesu
+T}|T{
+\f(CWutf16le\fP, \f(CWutf16be\fP, \f(CWutf16\fP source
+T}|T{
+\f(CWfffd\fP: a lone surrogate, and an odd final byte, are read as U+FFFD.
+.br
+\f(CWq\fP: they are read as \f(CW?\fP.
+.br
+\f(CWcesu\fP: every unit is kept as itself, so a \f(CWutf8\fP target writes each surrogate as its own three-byte sequence and NUL as \f(CWC0 80\fP; an odd final byte is read as U+FFFD.
+T}
+_
+encode|T{
+strict
+.br
+bestfit
+T}|\f(CWcp\fINNN\fR target|T{
+\f(CWstrict\fP: exact mappings only, as \fBWC_NO_BEST_FIT_CHARS\fP.
+.br
+\f(CWbestfit\fP: Windows' best-fit mapping (Section 4.5.1).
+T}
+_
+unmappable|T{
+default
+.br
+fail
+T}|T{
+any target that can meet an unmappable character
+T}|T{
+\f(CWdefault\fP: the target's default character. \f(CW?\fP, 0x3F, for the published single-byte tables, the multi-byte charsets, \f(CWgsm0338\fP, \f(CWt61\fP and every \f(CWcp\fINNN\fR except the EBCDIC pages, where it is EBCDIC \f(CW?\fP, 0x6F; in \f(CWiso2022jp\fP the \f(CW?\fP is written in ASCII. U+FFFD for the Unicode targets (\f(CWutf8\fP, \f(CWutf16*\fP, \f(CWutf32*\fP, \f(CWcesu8\fP, \f(CWutf7\fP) and \f(CWlowbyte16\fP (where it becomes the byte 0xFD).
+.br
+\f(CWfail\fP: the whole result is null (Section 4.3.4).
+T}
+_
+hex case|uc|\f(CWhex\fP target|Uppercase hex digits.
+_
+padding|nopad|T{
+\f(CWbase64\fP, \f(CWbase64url\fP, \f(CWbase32\fP target
+T}|T{
+No \f(CW=\fP padding. Also accepted for the crypt alphabets, which never pad.
+T}
+_
+decode|lenient|T{
+\f(CWhex\fP, \f(CWbase64\fP source
+T}|T{
+The decoding of \fBfromhex()\fP and \fBfrombase64()\fP (Section 4.4.1).
+T}
+.TE
+.ad
+.TB "Policy Tokens"
+.P
+An ill-formed unit is one byte of ill-formed UTF-8; in a standard
+single-byte charset, a byte the table does not define; in UTF-32, a
+four-byte unit that is not a scalar value, or a partial final unit;
+in
+.BR cesu8 ,
+a four-byte form or a lone surrogate; in
+.BR utf7 ,
+an ill-formed base64 run or a byte outside the RFC 2152 sets; in a
+multi-byte charset,
+.B gsm0338
+or
+.BR t61 ,
+the bytes that the rules of Section 4.2.1 delimit.
+A
+.BI cp NNN
+source never meets an ill-formed unit: the lenient decode reads
+every byte as Windows does, and
+.B null
+is the strict decode, which rejects what Windows rejects.
+.P
+A character is unmappable when the target cannot write it: in a
+published single-byte table or a multi-byte charset, a code point
+the table lacks; in a
+.BI cp NNN
+target, a UTF-16 unit that the page encodes to its default byte
+and that is not itself the character that byte decodes to
+(Section 4.5.6); in a Unicode target other than
+.BR utf8 ,
+or in
+.BR lowbyte16 ,
+an ill-formed byte kept under
+.BR keep ;
+and in
+.B utf7
+and the UTF-32 targets, which cannot hold a surrogate, a lone
+surrogate kept under
+.BR cesu .
+.P
+Whether
+.B fail
+applies is decided twice.
+Where the pair can meet an unmappable character under some choice
+of tokens,
+.B fail
+is accepted.
+Where the tokens in force, given or default, leave nothing
+unmappable,
+.B fail
+has no effect and is dropped:
+.B convert(x,\ \(dqutf8\(dq,\ \(dqutf16le\(dq,\ \(dqnull\(dq,\ \(dqfail\(dq)
+is the same instruction as
+.BR utf16le(x) ,
+because
+.B null
+leaves nothing to keep.
+The default
+.B fffd
+does the same for a UTF-16 source: it reads a lone surrogate as
+U+FFFD, so
+.B convert(x,\ \(dqutf16le\(dq,\ \(dqutf7\(dq,\ \(dqfail\(dq)
+is the plain instruction, as it is with
+.B fffd
+written out, and only with
+.B cesu
+does
+.B fail
+take effect there.
+Where the pair can never meet an unmappable character, as
+.B latin1
+to
+.B utf8
+cannot,
+.B fail
+is a compile-time error.
+.na
+.TS H
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+.TH
+ff41|utf16le(pass)|\fI(empty)\fP
+ff41|convert(pass, "utf8", "utf16le")|fdff4100
+ff41|convert(pass, "utf8", "utf16le", "null")|\fI(empty)\fP
+ff41|convert(pass, "utf8", "utf16le", "latin1")|ff004100
+ff41|convert(pass, "utf8", "utf16le", "fffd")|fdff4100
+ff41|convert(pass, "utf8", "utf16le", "fail")|\fI(empty)\fP
+ff41|convert(pass, "utf8", "utf8")|ff41
+ff41|convert(pass, "utf8", "utf8", "latin1")|c3bf41
+ff41|convert(pass, "utf8", "utf8", "fffd")|efbfbd41
+ff41|convert(pass, "utf8", "cp1252")|3f41
+ff41|convert(pass, "utf8", "cp1252", "latin1")|ff41
+ff41|convert(pass, "utf8", "cp1252", "fail")|\fI(empty)\fP
+3dd8|convert(pass, "utf16le", "utf16be")|fffd
+3dd8|convert(pass, "utf16le", "utf16be", "q")|003f
+3dd8|convert(pass, "utf16le", "utf16be", "cesu")|d83d
+c481|convert(pass, "utf8", "cp1252")|3f
+c481|convert(pass, "utf8", "cp1252", "bestfit")|61
+c481|convert(pass, "utf8", "cp1252", "fail")|\fI(empty)\fP
+c481|convert(pass, "utf8", "cp1252", "bestfit", "fail")|61
+e282ac|convert(pass, "utf8", "latin1")|3f
+e282ac|convert(pass, "utf8", "latin1", "fail")|\fI(empty)\fP
+a5|convert(pass, "iso8859_3", "utf8")|a5
+a5|convert(pass, "iso8859_3", "utf8", "latin1")|c2a5
+a5|convert(pass, "iso8859_3", "utf16le")|fdff
+8220|convert(pass, "shift_jis", "utf8", "fffd")|efbfbd20
+82ff|convert(pass, "shift_jis", "utf8", "fffd")|efbfbd
+0000d83d|convert(pass, "utf32be", "utf8", "fffd")|efbfbd
+feffd83d|convert(pass, "utf16", "utf8", "q")|3f
+81|convert(pass, "cp1252", "utf8", "null")|c281
+8241|convert(pass, "cp932", "utf8")|e383bb
+8241|convert(pass, "cp932", "utf8", "null")|\fI(empty)\fP
+01|convert(pass, "cp437", "utf8")|01
+01|convert(pass, "cp437", "utf8", "glyphs")|e298ba
+e298ba|convert(pass, "utf8", "cp437", "bestfit")|01
+e282ac|convert(pass, "utf8", "iso8859_5")|3f
+e282ac|convert(pass, "utf8", "iso8859_5", "fail")|\fI(empty)\fP
+ff|convert(pass, "utf8", "utf32be")|0000fffd
+.TE
+.ad
+.TB "Policy Tokens Applied"
+.P
+.B convert(pass,\ \(dqutf8\(dq,\ \(dqutf16le\(dq)
+and
+.B utf16le(pass)
+differ only on ill-formed input:
+.B utf16le()
+is the
+.B null
+form.
+Strict Windows decoding accepts the C1 fills of undefined bytes
+(CP1252 0x81 is U+0081) and the EUDC pairs; it rejects every
+undefined byte that the lenient decode sends to the private-use
+area, every invalid trail byte, and a lead byte at the end or
+before NUL.
+.B glyphs
+is a decode token; encoding a glyph character back to its byte is
+Windows' best fit, which writes U+263A as 0x01.
+.H 3 "Premap Tokens"
+.P
+A premap is one character-level map applied between decoding and
+encoding.
+At most one is given per call.
+It applies in the domain of the call: on bytes between transfer
+encodings
+.RB ( raw
+to
+.BR raw ),
+on code points between charsets.
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lw(1.9i) lw(2.6i).
+Token|On bytes|On characters
+_
+lower, upper|T{
+ASCII letters only; every other byte unchanged
+T}|T{
+Unicode 18.0.0 simple case mapping (Section 4.6)
+T}
+rev|Reverse the bytes|T{
+Reverse the characters (Section 4.1)
+T}
+rot13|ASCII letters only|ASCII letters only
+T{
+lower_win
+.br
+upper_win
+T}|\(em|T{
+Windows' standard case table (Section 4.5.4)
+T}
+T{
+lower_full
+.br
+upper_full
+T}|\(em|T{
+Unicode 18.0.0 full case mapping (Section 4.6.1)
+T}
+T{
+nfc, nfd,
+.br
+nfkc, nfkd
+T}|\(em|T{
+Unicode 18.0.0 normalization (Section 4.6.2)
+T}
+nfd_hfs|\(em|T{
+HFS+ decomposition (Section 4.6.2)
+T}
+upper_oem|\(em|T{
+Windows' uppercase-to-OEM conversion (Section 4.5.5); an OEM \f(CWcp\fINNN\fR target only, with \f(CWbestfit\fP
+T}
+.TE
+.ad
+.TB "Premap Tokens"
+.P
+The byte-domain case maps fold A\(enZ and a\(enz explicitly and
+do not call the C library, so no locale can change them.
+In the character domain, an ill-formed byte kept under
+.B keep
+is not a character: no map changes it, and
+.B rev
+moves it as one unit.
+Because the premap runs before encoding, it can be combined with
+any target:
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+48656c6c6f|convert(pass, "raw", "raw", "rev")|6f6c6c6548
+48656c6c6f|convert(pass, "raw", "raw", "upper")|48454c4c4f
+48c3a9|rot13(pass)|55c3a9
+c389|convert(pass, "utf8", "cp1252", "lower")|e9
+c3a9|convert(pass, "utf8", "cp437", "upper_win")|90
+c39f|convert(pass, "utf8", "utf16le", "upper_full")|53005300
+.TE
+.ad
+.TB "Premaps Applied"
+.H 3 "Compile-Time Errors"
+.P
+Every misuse of
+.B convert()
+is a compile-time error that names the offending argument, and no
+argument is replaced by a default.
+A token that cannot apply to the pair is an error, never ignored.
+Two kinds of token that apply but cannot change the result are
+dropped, so the instruction is the same as without them:
+.B fail
+where the tokens in force, given or default, leave nothing
+unmappable, and an ill-formed-source
+token on a source that defines every byte (Section 4.3.1).
+The messages are:
+.na
+.TS H
+box, tab(|);
+lB lB
+lw(1.5i) lf(CW)w(4.4i).
+Condition|Example and message
+_
+.TH
+T{
+Fewer than three arguments
+T}|T{
+convert(pass, "utf8")
+.br
+convert() takes a value, a source encoding and a target encoding
+T}
+_
+T{
+An encoding that is not a string literal
+T}|T{
+convert(pass, salt, "utf8")
+.br
+convert(): argument 2 must be a string literal
+T}
+_
+Unknown encoding|T{
+convert(pass, "ebcdic", "utf8")
+.br
+convert(): unknown encoding 'ebcdic'
+T}
+_
+T{
+Encode-only source
+T}|T{
+convert(pass, "lowbyte16", "utf8")
+.br
+convert(): 'lowbyte16' is encode-only and cannot be a source
+T}
+_
+T{
+A charset with a transfer encoding
+T}|T{
+convert(pass, "utf8", "raw")
+.br
+convert(): 'utf8' is a charset and 'raw' a transfer encoding; nest two convert() calls instead of mixing them
+T}
+_
+Unknown token|T{
+convert(pass, "utf8", "cp1252", "wibble")
+.br
+convert(): unknown token 'wibble'
+T}
+_
+T{
+Two tokens of one group
+T}|T{
+convert(pass, "utf8", "cp1252", "strict", "bestfit")
+.br
+convert(): 'strict' and 'bestfit' are both encode tokens
+.sp 0.3v
+convert(pass, "utf8", "utf8", "upper_win", "upper")
+.br
+convert(): 'upper_win' and 'upper' are both premap tokens
+T}
+_
+T{
+A token that does not apply to the pair
+T}|T{
+convert(pass, "latin1", "utf8", "fail")
+.br
+convert(): token 'fail' does not apply to latin1 \-> utf8
+.sp 0.3v
+convert(pass, "utf8", "koi8r", "bestfit")
+.br
+convert(): token 'bestfit' does not apply to utf8 \-> koi8r
+.sp 0.3v
+convert(pass, "utf8", "cp1252", "upper_oem", "bestfit")
+.br
+convert(): token 'upper_oem' does not apply to utf8 \-> cp1252
+.sp 0.3v
+convert(pass, "raw", "raw", "upper_win")
+.br
+convert(): token 'upper_win' does not apply to raw \-> raw
+.sp 0.3v
+convert(pass, "base64", "raw", "nopad")
+.br
+convert(): token 'nopad' does not apply to base64 \-> raw
+.sp 0.3v
+convert(pass, "cp1252", "utf8", "fffd")
+.br
+convert(): token 'fffd' does not apply to cp1252 \-> utf8
+.sp 0.3v
+convert(pass, "cp1252", "utf8", "glyphs")
+.br
+convert(): token 'glyphs' does not apply to cp1252 \-> utf8
+T}
+_
+T{
+\f(CWupper_oem\fP without \f(CWbestfit\fP
+T}|T{
+convert(pass, "utf8", "cp437", "upper_oem")
+.br
+convert(): premap 'upper_oem' is Windows' best-fit OEM conversion; give "bestfit" with it
+T}
+.TE
+.ad
+.TB "convert() Compile-Time Errors"
+.P
+A named conversion that does not exist, such as
+.B utf8_to_koi8r_bestfit
+or
+.BR cp01252_to_utf8 ,
+is an unknown function (Section 2.7.1).
+.H 3 "A Failed Conversion Is Null"
+.P
+A conversion that cannot be carried out gives the empty string,
+with exit status 0.
+It never gives an error, and never a partial result: hx has no
+other failure channel, and a shortened string could not be told
+apart from the conversion of some other input.
+The result is null when
+.BL
+.LI
+the source is
+.B utf8
+under
+.B null
+and the input is not well-formed UTF-8, as for
+.BR utf16le() ,
+.B utf16be()
+and
+.BR utf7() ,
+or any other source under
+.B null
+meets an ill-formed unit (Section 4.3.1);
+.LI
+a
+.BI cp NNN
+source under
+.B null
+meets a byte or pair that the strict Windows decode rejects;
+.LI
+.B fail
+is given and a character is unmappable;
+.LI
+a strict transfer decoder meets text its encoder cannot produce.
+.LE
+.P
+A hash over a null result hashes the empty string, which looks
+like a clean miss.
+A type whose definition needs a reading of ill-formed input
+states it explicitly: with
+.BR zext16() ,
+.BR latin1_to_utf8() ,
+.B cp1252_to_utf8()
+or
+.B cp1251_to_utf8()
+first, or with the
+.B latin1
+or
+.B fffd
+token.
+.H 3 "Fusion"
+.P
+When a program is prepared for execution, two adjacent conversions
+are fused into one where the result is provably the same.
+Between charsets, \fIA\fP\(->\fIB\fP followed by
+\fIB\fP\(->\fIC\fP becomes \fIA\fP\(->\fIC\fP when
+.I B
+is UTF-8 or UTF-16, at most one of the two has a premap, the
+first cannot pass an ill-formed byte or a lone surrogate through
+(it is not a source that can meet an ill-formed unit, such as
+.B utf8
+or
+.BR iso8859_3 ,
+under
+.BR keep ,
+or a UTF-16 source under
+.BR cesu ),
+the first does not carry
+.BR fail ,
+and the second has no lone-surrogate token.
+An encode followed by a decode
+.RB ( utf8 \(-> cp\fINNN\fP \(-> utf8 )
+is lossy and is never fused.
+Between transfer encodings, a step through
+.B raw
+or
+.B hex
+fuses, and
+.B upper()
+or
+.B lower()
+of a
+.B hex
+result becomes the
+.B uc
+form or the plain one.
+.P
+Fusion changes only what runs and what the duplicate-detection
+comparator sees; the compiled program, and so a user type's
+stable identifier, is the program as written.
+.B "hx \-b"
+prints both:
+.DS
+.ft CW
+$ hx \-b 'utf16le(latin1_to_utf8(pass))'
+  ...
+    1  CONVERT    convert latin1->utf8 [] premap=none
+    2  CONVERT    convert utf8->utf16le [null] premap=none
+    3  HALT
+--- fused for execution: 3 instructions ---
+    0  PUSH_VAR   0 (pass)
+    1  CONVERT    convert latin1->utf16le [] premap=none
+    2  HALT
+.ft R
+.DE
+.P
+The fused instruction is that of
+.BR zext16() ,
+and
+.B upper(hex(x))
+fuses to
+.BR convert(x,\ \(dqraw\(dq,\ \(dqhex\(dq,\ \(dquc\(dq) .
+.H 2 "Named Conversions"
+.P
+Each function below is an alias: the compiler turns it into
+exactly the instruction its
+.B convert()
+form produces, and
+.B "hx \-b"
+prints the same line for both.
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Function|convert() form
+_
+utf16le(x)|convert(x, "utf8", "utf16le", "null")
+utf16be(x)|convert(x, "utf8", "utf16be", "null")
+utf7(x)|convert(x, "utf8", "utf7", "null")
+zext16(x)|convert(x, "latin1", "utf16le")
+from_cp1252(x), cp1252_to_utf8(x)|convert(x, "cp1252", "utf8")
+from_cp1251(x), cp1251_to_utf8(x)|convert(x, "cp1251", "utf8")
+cp\fINNN\fP_to_utf8(x)|convert(x, "cp\fINNN\fP", "utf8")
+utf8_to_cp\fINNN\fP(x)|convert(x, "utf8", "cp\fINNN\fP")
+utf8_to_cp\fINNN\fP_bestfit(x)|convert(x, "utf8", "cp\fINNN\fP", "bestfit")
+latin1_to_utf8(x)|convert(x, "latin1", "utf8")
+utf8_to_latin1(x)|convert(x, "utf8", "latin1")
+koi8r_to_utf8(x)|convert(x, "koi8r", "utf8")
+utf8_to_koi8r(x)|convert(x, "utf8", "koi8r")
+koi8u_to_utf8(x)|convert(x, "koi8u", "utf8")
+utf8_to_koi8u(x)|convert(x, "utf8", "koi8u")
+from_utf16le(x)|convert(x, "utf16le", "utf8")
+from_utf16be(x)|convert(x, "utf16be", "utf8")
+from_utf16le_q(x)|convert(x, "utf16le", "utf8", "q")
+from_utf16be_q(x)|convert(x, "utf16be", "utf8", "q")
+from_utf16le_cesu(x)|convert(x, "utf16le", "utf8", "cesu")
+from_utf16be_cesu(x)|convert(x, "utf16be", "utf8", "cesu")
+ulower(x)|convert(x, "utf8", "utf8", "lower")
+uupper(x)|convert(x, "utf8", "utf8", "upper")
+ulower_win(x)|convert(x, "utf8", "utf8", "lower_win")
+uupper_win(x)|convert(x, "utf8", "utf8", "upper_win")
+urev(x)|convert(x, "utf8", "utf8", "rev")
+ulower_full(x)|convert(x, "utf8", "utf8", "lower_full")
+uupper_full(x)|convert(x, "utf8", "utf8", "upper_full")
+nfc(x)|convert(x, "utf8", "utf8", "nfc")
+nfd(x)|convert(x, "utf8", "utf8", "nfd")
+nfkc(x)|convert(x, "utf8", "utf8", "nfkc")
+nfkd(x)|convert(x, "utf8", "utf8", "nfkd")
+nfd_hfs(x)|convert(x, "utf8", "utf8", "nfd_hfs")
+utf16_lowbyte(x)|convert(x, "utf8", "lowbyte16")
+lower(x)|convert(x, "raw", "raw", "lower")
+upper(x)|convert(x, "raw", "raw", "upper")
+rev(x)|convert(x, "raw", "raw", "rev")
+rot13(x)|convert(x, "raw", "raw", "rot13")
+hex(x)|convert(x, "raw", "hex")
+base64(x)|convert(x, "raw", "base64")
+phpass_encode(x)|convert(x, "raw", "crypt64")
+cisco4_encode(x)|convert(x, "raw", "crypt64be")
+fromhex(x)|convert(x, "hex", "raw", "lenient")
+frombase64(x)|convert(x, "base64", "raw", "lenient")
+.TE
+.ad
+.TB "Named Conversions"
+.P
+.I NNN
+is any code page of Section 4.2.1, written in decimal without
+leading zeros.
+.P
+.B from_cp1252()
+is UTF-8 read as CP1252 bytes, which is the most common form of
+mojibake;
+.B utf8_to_cp1252()
+undoes it.
+.B utf16le(latin1_to_utf8(x))
+equals
+.B zext16(x)
+for every
+.IR x .
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+80|from_cp1252(pass)|e282ac
+81|cp1252_to_utf8(pass)|c281
+c3a9|from_cp1252(pass)|c383c2a9
+c3a9|utf8_to_cp1252(from_cp1252(pass))|c3a9
+c0e0|from_cp1251(pass)|d090d0b0
+80|latin1_to_utf8(pass)|c280
+c280|utf8_to_latin1(pass)|80
+e9|zext16(pass)|e900
+e9|utf16le(latin1_to_utf8(pass))|e900
+db|cp874_to_utf8(pass)|efa381
+82a0|cp932_to_utf8(pass)|e38182
+b0a1|cp949_to_utf8(pass)|eab080
+82|cp437_to_utf8(pass)|c3a9
+c9|cp437_to_utf8(pass)|e29594
+01|cp437_to_utf8(pass)|01
+d5|cp850_to_utf8(pass)|c4b1
+d5|cp858_to_utf8(pass)|e282ac
+d5|cp857_to_utf8(pass)|efa2bb
+25|cp864_to_utf8(pass)|25
+80|cp869_to_utf8(pass)|c280
+80|cp10000_to_utf8(pass)|c384
+.TE
+.ad
+.TB "Decoding Examples"
+.P
+Undefined bytes decode as Windows' table says, whatever it says:
+CP1252 0x81 is U+0081 and CP874 0xDB the private-use U+F8C1.
+Control bytes decode to the controls (CP437 0x01 is U+0001, not a
+glyph).
+CP850 and CP858 differ only at 0xD5 (U+0131 and \[u20AC]).
+Microsoft's published files leave out CP857 0xD5 and CP869 0x80.
+Windows decodes 0xD5 to the private-use U+F8BB, which the strict
+decode rejects, and 0x80 to the C1 fill U+0080, which it accepts.
+CP864 0x25 is
+.BR % ,
+where Microsoft's file has U+066A.
+.P
+The UTF-16 decoders read a valid surrogate pair as one code point
+and handle a lone surrogate, or an odd final byte, by their policy.
+The three policies reproduce three runtimes: U+FFFD is .NET
+.B Encoding.UTF8
+and WHATWG;
+.B ?
+is Java's
+.BR String.getBytes("UTF-8") ;
+.B cesu
+is Java's modified UTF-8
+.RB ( writeUTF ,
+JNI), including its overlong NUL.
+.na
+.TS
+box, tab(|);
+lB lB lB lB
+lf(CW) lf(CW) lf(CW) lf(CW).
+Input|from_utf16le|from_utf16le_q|from_utf16le_cesu
+_
+4100|41|41|41
+3dd800de|f09f9880|f09f9880|eda0bdedb880
+3dd8|efbfbd|3f|eda0bd
+3dd841|efbfbdefbfbd|3f3f|eda0bdefbfbd
+0000|00|00|c080
+.TE
+.ad
+.TB "UTF-16 Decoding (Result of each function applied to pass)"
+.P
+A cut in UTF-16 units can leave a lone surrogate.
+The first ten units of \(lqaaaaaaaaa\(rq followed by U+1F600, as
+a .NET or Java program would take them:
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Expression|Result
+_
+from_utf16le(cut(utf16le(pass), 0, 20))|616161616161616161efbfbd
+from_utf16le_q(cut(utf16le(pass), 0, 20))|6161616161616161613f
+from_utf16le_cesu(cut(utf16le(pass), 0, 20))|616161616161616161eda0bd
+.TE
+.ad
+.TB "Truncation in UTF-16 Units (Input 616161616161616161f09f9880)"
+.P
+.B utf16_lowbyte()
+keeps the low byte of each UTF-16 unit, as JavaScript's
+.B "charCodeAt(i) & 0xFF"
+and Java's
+.B (byte)c
+do; it is the input that hash libraries written for 8-bit
+characters see.
+An ill-formed byte is read as U+FFFD, whose low byte is 0xFD,
+unless
+.B fail
+is given:
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+e282ac|utf16_lowbyte(pass)|ac
+d0b0|utf16_lowbyte(pass)|30
+f09f9880|utf16_lowbyte(pass)|3d00
+41ff|utf16_lowbyte(pass)|41fd
+41ff|convert(pass, "utf8", "lowbyte16", "fail")|\fI(empty)\fP
+.TE
+.ad
+.TB "Low Byte of Each UTF-16 Unit"
+.H 3 "The Lenient Decoders"
+.P
+.B fromhex()
+and
+.B frombase64()
+are the
+.B lenient
+decoding, which is never null:
+.BL
+.LI
+.BR hex :
+output byte
+.I i
+is nib(\fIx\fP[2\fIi\fP])\(mu16 + nib(\fIx\fP[2\fIi\fP+1]),
+where nib gives the value of
+.BR 0 \(en 9 ,
+.BR a \(en f
+and
+.BR A \(en F ,
+and 0 for any other byte.
+A final odd character is ignored.
+.LI
+.BR base64 :
+groups of up to four characters
+.I "a b c d"
+are read from the start while at least two characters remain; a
+single final character is ignored.
+.I a
+and
+.I b
+are always consumed;
+.I c
+is consumed unless it is
+.B =
+or the end, and likewise
+.IR d .
+A consumed character outside the RFC 4648 alphabet reads as \-1.
+If
+.I a
+or
+.I b
+is \-1, decoding stops and keeps the bytes so far.
+Otherwise write
+.IR a <<2\ |\ b >>4;
+then, if
+.I c
+\(>= 0, write
+.RI ( b &15)<<4\ |\ c >>2;
+then, if
+.I d
+\(>= 0, write
+.RI ( c &3)<<6\ |\ d
+(with
+.I c
+= \-1 that is 0xC0\ |\ \fId\fP).
+An
+.B =
+is never consumed, so the group after one starts on it and stops.
+.LE
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Expression|Result
+_
+fromhex("zz41")|0041
+fromhex("41 42")|4104
+fromhex("4")|\fI(empty)\fP
+frombase64("QQ")|41
+frombase64("QR*Z")|41d9
+frombase64("QU=D")|41
+frombase64("*QUJD")|\fI(empty)\fP
+.TE
+.ad
+.TB "Lenient Decoding"
+.H 3 "Functions That Are Not Conversions"
+.P
+These are ordinary function calls, not forms of
+.BR convert() :
+.BL
+.LI
+.B ebcdic()
+is not a code page (Section 4.2.1).
+.LI
+.BR ucut() ,
+.B utrunc()
+and
+.B ulength()
+take or return integers.
+.LI
+The scheme-specific encoders
+.RB ( juniper_encode() ,
+.BR cisco_pix_encode() ,
+.BR sha512crypt_encode() ,
+.BR bcrypt_encode() ,
+.BR lotus64_encode() ,
+.BR progress_encode() ,
+.B dahua_encode()
+and
+.BR besder_encode() )
+permute, truncate or interleave bytes, or carry literals, so none
+of them is a transfer encoding.
+.LI
+The output-role suffixes
+.RB ( _hex ,
+.BR _uc ,
+.BR _b64 )
+are properties of the hash call (Section 2.5.1).
+.LE
+.H 2 "Windows Behavior and Library Behavior"
+.P
+Every
+.BI cp NNN
+conversion reproduces Windows, not a conversion library.
+Where the two disagree, hx follows Windows, because a Windows
+program that converted a password produced Windows' bytes.
+Each rule in this section was established on Windows 11
+(build 26200, ANSI code page 1252, OEM code page 437) by calling the
+Windows functions named, and each
+.BI cp NNN
+table is an exhaustive dump of
+.B MultiByteToWideChar
+and
+.B WideCharToMultiByte
+(Section 4.2.1).
+.H 3 "Best Fit"
+.P
+.B WideCharToMultiByte
+by default replaces a character the page lacks with a look-alike:
+the best fit.
+That is what every Unicode Windows program did when it passed a
+password through an ANSI or OEM code page.
+.B bestfit
+selects it;
+.BR strict ,
+the default, accepts exact mappings only, as
+.B WC_NO_BEST_FIT_CHARS
+does, and writes the default character
+.B ?
+otherwise.
+Best fit is locale-specific: in CP932 \(lq\[u00A5]\(rq best-fits to
+0x5C, the backslash, because on Japanese Windows that byte is the
+yen sign, and CP949 does the same with U+20A9 (won sign).
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+efbca1|utf8_to_cp1252(pass)|3f
+efbca1|utf8_to_cp1252_bestfit(pass)|41
+e2889e|utf8_to_cp1252_bestfit(pass)|38
+e2889e|utf8_to_cp437(pass)|ec
+c3a9|utf8_to_cp1251_bestfit(pass)|65
+c380|utf8_to_cp437_bestfit(pass)|41
+c2a5|utf8_to_cp932(pass)|3f
+c2a5|utf8_to_cp932_bestfit(pass)|5c
+e282a9|utf8_to_cp949_bestfit(pass)|5c
+e288aa|utf8_to_cp932(pass)|81be
+81be879c|cp932_to_utf8(pass)|e288aae288aa
+.TE
+.ad
+.TB "Best Fit"
+.P
+Fullwidth U+FF21 best-fits to
+.BR A ,
+\(lq\[u221E]\(rq to
+.B 8
+in CP1252, and CP437 has \(lq\[u221E]\(rq at 0xEC, so even
+.B strict
+maps it there.
+In the double-byte pages one character can have two byte forms:
+CP932 decodes both 0x81BE and 0x879C to \(lq\[u222A]\(rq, and
+encoding chooses 0x81BE, as Windows' table does.
+.H 3 "DBCS Invalid Trail Bytes"
+.P
+On a double-byte page, a lead byte followed by any byte other than
+NUL is consumed as a pair, both bytes.
+If the pair is not in the page, it decodes as the page's Unicode
+default character: U+30FB (katakana middle dot) for 932,
+.B ?
+for 936, 949 and 950.
+A lead byte followed by NUL, or at the end of the input, decodes
+as the default character on its own, and the NUL is then decoded
+normally.
+This is
+.B MultiByteToWideChar
+without
+.BR MB_ERR_INVALID_CHARS ,
+the default reading.
+Under
+.B null
+the decode is
+.B MultiByteToWideChar
+with
+.BR MB_ERR_INVALID_CHARS :
+an invalid pair, or a lead byte at the end or before NUL, makes the
+whole result null.
+The libraries do otherwise: Java
+.BR windows-31j ,
+ICU and WHATWG
+.BR shift_jis ,
+and Python and Perl
+.B cp932
+keep the trail byte and emit U+FFFD.
+The standard and
+.B _web
+multi-byte charsets follow the Encoding Standard's error rule
+(Section 4.2.1).
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+8220|cp932_to_utf8(pass)|e383bb
+8200|cp932_to_utf8(pass)|e383bb00
+82|cp932_to_utf8(pass)|e383bb
+b020|cp949_to_utf8(pass)|3f
+8120|cp936_to_utf8(pass)|3f
+a120|cp950_to_utf8(pass)|3f
+8220|convert(pass, "cp932", "utf8", "null")|\fI(empty)\fP
+82|convert(pass, "cp932", "utf8", "null")|\fI(empty)\fP
+8220|convert(pass, "shift_jis_web", "utf8", "fffd")|efbfbd20
+.TE
+.ad
+.TB "Invalid Trail Bytes"
+.H 3 "Encoding per UTF-16 Unit"
+.P
+.B WideCharToMultiByte
+works on UTF-16 units.
+A character above U+FFFF is two surrogate units, neither of which
+any code page maps, so it encodes as two default characters.
+Every
+.BI cp NNN
+target does the same.
+.BR latin1 ,
+.BR koi8r ,
+.B koi8u
+and every other charset that is not a
+.BI cp NNN
+page encode per code point.
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+f09f9880|utf8_to_cp1252(pass)|3f3f
+f09f9880|utf8_to_cp932(pass)|3f3f
+f09f9880|utf8_to_cp28591(pass)|3f3f
+f09f9880|utf8_to_latin1(pass)|3f
+f09f9880|utf8_to_koi8r(pass)|3f
+f09f9880|convert(pass, "utf8", "iso8859_7")|3f
+f09f9880|convert(pass, "utf8", "shift_jis")|3f
+.TE
+.ad
+.TB "U+1F600 Encoded"
+.H 3 "The Windows Case Tables"
+.P
+.B ulower_win()
+and
+.B uupper_win()
+are Windows' standard case table:
+.B CharLowerBuffW
+and
+.BR CharUpperBuffW ,
+dumped over every BMP code point.
+.BR CharUpperW ,
+.BR RtlUpcaseUnicodeChar ,
+.B LCMapStringEx
+with the invariant locale, and .NET Framework 4.8
+.B ToUpperInvariant
+and
+.B ToLowerInvariant
+use the same table.
+It is the simple case mapping restricted to pairs that round-trip,
+taken from a Unicode version older than 8.0, and it covers the BMP
+only.
+So \(lq\[u0130]\(rq, U+1E9E (capital sharp s),
+\(lq\[u00B5]\(rq, \(lq\[u0131]\(rq and \(lq\[u03C2]\(rq are unchanged,
+the Cherokee (U+13A0) and Georgian (U+10D0) case pairs that
+Unicode 8 and 11 added are absent, and U+10428 has no uppercase.
+.na
+.TS
+box, tab(|);
+lB lB lB lB
+lf(CW) l lf(CW) lf(CW).
+Input|Character|Expression|Result
+_
+c4b0|\[u0130] U+0130|ulower_win(pass)|c4b0
+e1ba9e|U+1E9E|ulower_win(pass)|e1ba9e
+c2b5|\[u00B5] U+00B5|uupper_win(pass)|c2b5
+cf82|\[u03C2] U+03C2|uupper_win(pass)|cf82
+c4b1|\[u0131] U+0131|uupper_win(pass)|c4b1
+e18ea0|U+13A0|ulower_win(pass)|e18ea0
+e18390|U+10D0|uupper_win(pass)|e18390
+f09090a8|U+10428|uupper_win(pass)|f09090a8
+.TE
+.ad
+.TB "Windows Case Table (compare Section 4.6)"
+.P
+.B LCMapStringEx
+with
+.B LCMAP_LINGUISTIC_CASING
+gives the plain simple mapping on the first five of these
+characters, with no final-sigma rule, as
+.B ulower()
+and
+.B uupper()
+do.
+Like the standard table, it leaves the Cherokee and Georgian
+letters unmapped, where
+.B ulower()
+and
+.B uupper()
+map them (Section 4.6.1).
+.H 3 "LM Password Preparation"
+.P
+Windows prepares an LM password with
+.BR RtlUpcaseUnicodeStringToOemString :
+uppercase, then convert to the OEM code page.
+Measured on Windows 11, that is not \(lquppercase, then encode\(rq
+by any rule.
+Best fit applies (U+0101 becomes
+.BR A ),
+and
+\(lq\[u0131]\(rq, which
+.B RtlUpcaseUnicodeChar
+leaves unchanged and CP437 best-fits to
+.BR i ,
+becomes
+.BR I .
+The closest closed-form rule found still misses 14 of the 65,536
+BMP code points for CP437.
+The
+.B upper_oem
+premap is therefore a direct table from code point to OEM byte,
+dumped per OEM page by running Windows' uppercase-to-OEM
+conversion
+.RB ( RtlUpcaseUnicodeToCustomCPN
+over each page's table) on every BMP code point; for CP437 the
+dump equals the system's own OEM path on all 65,536.
+It exists for the sixteen OEM pages 437 to 869 of Section 4.2.1,
+not 708 or 720, and only
+with
+.BR bestfit ,
+because Windows' preparation always best-fits.
+.P
+A character with no OEM form makes Windows' function fail
+(STATUS_UNMAPPABLE_CHARACTER, 0xC0000162) rather than write
+.BR ? ,
+and
+.B fail
+reproduces that as a null result.
+The LM password preparation of a CP437 machine is therefore
+.DS
+.ft CW
+convert(pass, "utf8", "cp437", "bestfit", "upper_oem", "fail")
+.ft R
+.DE
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) l lf(CW).
+Input|Character|Result
+_
+70617373776f7264|password|50415353574f5244
+c3a9|\[u00E9] U+00E9|90
+c481|U+0101|41
+c4b1|\[u0131] U+0131|49
+c3bf|\[u00FF] U+00FF|59
+c2b5|\[u00B5] U+00B5|e6
+c39f|\[u00DF] U+00DF|e1
+efbca1|U+FF21|41
+e282ac|\[u20AC] U+20AC|\fI(empty)\fP
+d0b0|U+0430|\fI(empty)\fP
+.TE
+.ad
+.TB "CP437 LM Preparation (Result of the expression above)"
+.P
+Without
+.BR fail ,
+\(lq\[u20AC]\(rq becomes
+.B ?
+(0x3F).
+Composing the steps by hand gives the wrong answer for
+\(lq\[u0131]\(rq:
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW)p-2 lf(CW).
+Input|Expression|Result
+_
+e282ac|convert(pass, "utf8", "cp437", "bestfit", "upper_oem")|3f
+c4b1|utf8_to_cp437_bestfit(uupper_win(pass))|69
+70c3a9|convert(pass, "utf8", "cp850", "bestfit", "upper_oem", "fail")|5090
+.TE
+.ad
+.TB "upper_oem Compared"
+.P
+.BI lm_cp NNN ()
+computes the LM hash a Windows machine with OEM code page
+.I NNN
+stores: the LM DES step over the first 14 bytes of
+.DS
+.ft CW
+convert(x, "utf8", "cp\fINNN\fP", "bestfit", "upper_oem", "fail")
+.ft R
+.DE
+It exists for the sixteen OEM pages (\f(CWlm_cp437\fP \&...
+\f(CWlm_cp869\fP), returns 32 hex characters (16 bytes with
+.BR _bin ),
+and gives a null result when a character has no OEM form, so a
+password for which Windows computes no LM hash yields no hash
+rather than the hash of a
+.BR ? .
+An empty password, by contrast, has its standard LM hash.
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW)p-2 lf(CW)p-2 lf(CW)p-2.
+Input|Expression|Value
+_
+70617373776f7264|lm_cp437(pass)|e52cac67419a9a224a3b108f3fa6cb6d
+70c3a9|lm_cp437(pass)|36cfb8595f2839efaad3b435b51404ee
+70c3a9|lm_cp850(pass)|36cfb8595f2839efaad3b435b51404ee
+70c3a9|lm_cp866(pass)|fff9d11e8bb05983aad3b435b51404ee
+c4b1|lm_cp437(pass)|f7e62f36f8db5ae6aad3b435b51404ee
+49|lm_cp437(pass)|f7e62f36f8db5ae6aad3b435b51404ee
+e282ac|lm_cp437(pass)|\fI(empty)\fP
+\fI(empty)\fP|lm_cp437(pass)|aad3b435b51404eeaad3b435b51404ee
+6162636465666768697071727374|lm_cp437(pass)|e0c510199cc66abdd0aa0b4f90bff739
+61626364656667686970717273747576|lm_cp437(pass)|e0c510199cc66abdd0aa0b4f90bff739
+.TE
+.ad
+.TB "LM per OEM Code Page (Value is the function's own hex)"
+.P
+\(lqp\[u00E9]\(rq gives one hash in CP437 and CP850, where
+\(lq\[u00C9]\(rq is 0x90, and another in CP866, which has no
+\(lq\[u00E9]\(rq and best-fits it to
+.BR E .
+A password longer than 14 bytes after preparation is truncated
+to 14, as the last two rows show; Windows' own refusal to store
+an LM hash for a longer password is not modelled.
+.H 3 "Unmappable Characters"
+.P
+In a
+.BI cp NNN
+target a UTF-16 unit is unmappable when it encodes to the page's
+default character (0x3F, or 0x6F on the EBCDIC pages) and is not
+itself the character that byte decodes to.
+A character that best-fits to
+.B ?
+is therefore unmappable, and under
+.B fail
+gives a null result.
+Measured on Windows 11:
+.B RtlUpcaseUnicodeStringToOemString
+fails on U+FF1F (fullwidth question mark) and U+2047 (double
+question mark), and
+.B WideCharToMultiByte
+reports that it used the default character for both, while
+.B ?
+and \(lq\[u00BF]\(rq convert normally.
+hx gives the same four results.
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+efbc9f|convert(pass, "utf8", "cp1252", "bestfit")|3f
+efbc9f|convert(pass, "utf8", "cp1252", "bestfit", "fail")|\fI(empty)\fP
+e28187|convert(pass, "utf8", "cp1252", "bestfit", "fail")|\fI(empty)\fP
+3f|convert(pass, "utf8", "cp1252", "bestfit", "fail")|3f
+c2bf|convert(pass, "utf8", "cp1252", "bestfit", "fail")|bf
+.TE
+.ad
+.TB "Unmappable and Mappable Question Marks"
+.H 3 "How the Behavior Was Established"
+.na
+.TS
+box, tab(|);
+lB lB
+lw(1.9i) lw(4.0i).
+Rule|Windows functions measured
+_
+T{
+Code-page decoding, invalid trails
+T}|T{
+\fBMultiByteToWideChar\fP, flags 0, on every byte and every lead and trail pair of every page
+T}
+T{
+Strict decoding, glyph readings
+T}|T{
+\fBMultiByteToWideChar\fP with \fBMB_ERR_INVALID_CHARS\fP on every byte and every lead and trail pair of every page; with \fBMB_USEGLYPHCHARS\fP on every byte of the 16 OEM pages and 720
+T}
+T{
+Best fit, strict encoding, per-unit encoding
+T}|T{
+\fBWideCharToMultiByte\fP with and without \fBWC_NO_BEST_FIT_CHARS\fP, on every BMP code point of every page
+T}
+T{
+Windows case tables
+T}|T{
+\fBCharUpperBuffW\fP, \fBCharLowerBuffW\fP on every BMP code point; \fBCharUpperW\fP, \fBRtlUpcaseUnicodeChar\fP, \fBLCMapStringEx\fP and .NET Framework 4.8 on selected characters
+T}
+T{
+LM preparation
+T}|T{
+\fBRtlUpcaseUnicodeStringToOemString\fP on selected characters; \fBRtlUpcaseUnicodeToOemN\fP on every BMP code point (OEM code page 437); \fBRtlInitCodePageTable\fP and \fBRtlUpcaseUnicodeToCustomCPN\fP on every BMP code point for each of the sixteen OEM pages
+T}
+T{
+Unmappable characters
+T}|T{
+\fBRtlUpcaseUnicodeStringToOemString\fP status and \fBWideCharToMultiByte\fP's used-default flag
+T}
+.TE
+.ad
+.TB "Windows Measurements"
+.H 2 "Unicode"
+.P
+Every table derived from Unicode is generated from the Unicode
+18.0.0 data files and is never regenerated from a later version.
+A later version can add a case mapping to a character that already
+exists, when its partner is newly encoded: Unicode 11 gave 46
+existing Georgian letters (U+10D0 \&...) uppercase mappings to the
+new Mtavruli, Unicode 8 gave 87 existing characters mappings (the
+Cherokee letters U+13A0 \&... gained lowercase partners), and
+Unicode 5.0 changed U+0241's lowercase from U+0294 to U+0242.
+Moving the version would therefore change the digests of
+passwords containing such characters.
+A token or function name always denotes the Unicode 18.0.0
+table; a table from another version has its own name.
+.B "hx \-V"
+reports the Unicode version and where the conversion tables come
+from:
+.DS
+.ft CW
+.ps 8
+$ hx \-V
+hx (v0.1)
+Unicode 18.0.0, frozen
+cpNNN code pages, Windows case tables and LM preparation: Windows 11
+KOI8-R and KOI8-U: RFC 1489 and RFC 2319
+iso8859_N: ISO/IEC 8859; mac_* and adobe_symbol: Apple; adobe_standard: Adobe
+jis_x0201: JIS X 0201; kz1048: STRK1048-2002; viscii: RFC 1456; hp_roman8, dec_mcs: RFC 1345
+atascii, petscii, petscii_shifted: Unicode L2/19-025; ascii: ANSI X3.4
+shift_jis, euc_jp, iso2022jp: JIS X 0208, JIS X 0212, RFC 1468; euc_kr: KS X 1001;
+    euc_jp_c1, euc_kr_c1: with C1, as glibc
+gb2312, gb18030: GB 18030-2022; *_web: WHATWG Encoding Standard
+utf32*, utf16, cesu8, utf7: Unicode, UTR #26, RFC 2152; gsm0338: 3GPP TS 23.038;
+    t61: ITU-T T.61
+.ps
+.ft R
+.DE
+.P
+Each source is printed on one line; the two longest are wrapped
+here.
+.H 3 "Case Mapping"
+.P
+hx offers three case mappings over characters, each matching a
+family of runtimes:
+.BL
+.LI
+.I simple
+.RB ( ulower() ,
+.BR uupper() ,
+premaps
+.B lower
+and
+.BR upper ):
+one character to one character, as Java's
+.BR Character.toLowerCase(int) ;
+Windows'
+.B LCMapStringEx
+with
+.B LCMAP_LINGUISTIC_CASING
+agrees except on the case pairs that Unicode 8 and 11 added
+(Section 4.5.4);
+.LI
+.I full
+.RB ( ulower_full() ,
+.BR uupper_full() ,
+premaps
+.B lower_full
+and
+.BR upper_full ):
+as Java's
+.BR String.toLowerCase ,
+JavaScript, Python's
+.B str.lower
+and PHP's
+.BR mb_strtolower ;
+.LI
+.I Windows
+.RB ( ulower_win() ,
+.BR uupper_win() ):
+Windows' standard table (Section 4.5.4).
+.LE
+.P
+The simple mapping is UnicodeData.txt field 13 for lowercase and field 12
+for uppercase.
+A character with no mapping, and an ill-formed byte, is unchanged.
+A simple mapping never changes the number of characters, so
+truncation before and after it agree, though it can change the
+byte length (U+1E9E, three bytes, lowercases to
+\(lq\[u00DF]\(rq, two).
+No language tailoring is applied: Turkish and Azeri dotted and
+dotless I are not special, and there is no final-sigma rule.
+.na
+.TS
+box, tab(|);
+lB lB lB lB
+lf(CW) l lf(CW) lf(CW).
+Input|Character|Expression|Result
+_
+c4b0|\[u0130] U+0130|ulower(pass)|69
+e1ba9e|U+1E9E|ulower(pass)|c39f
+c39f|\[u00DF] U+00DF|uupper(pass)|c39f
+c2b5|\[u00B5] U+00B5|uupper(pass)|ce9c
+cf82|\[u03C2] U+03C2|uupper(pass)|cea3
+c4b1|\[u0131] U+0131|uupper(pass)|49
+e18ea0|U+13A0|ulower(pass)|eaadb0
+e18390|U+10D0|uupper(pass)|e1b290
+f09090a8|U+10428|uupper(pass)|f0909080
+ce9fce94ce9fcea3|\[u039F]\[u0394]\[u039F]\[u03A3]|ulower(pass)|cebfceb4cebfcf83
+f09f9880|U+1F600|uupper(pass)|f09f9880
+.TE
+.ad
+.TB "Simple Case Mapping (compare Section 4.5.4)"
+.P
+The full mapping adds the unconditional rows of SpecialCasing.txt,
+which can change the number of characters (\(lq\[u00DF]\(rq
+uppercases to
+.BR SS ,
+\(lq\[u0130]\(rq lowercases to
+.B i
+followed by U+0307), and the Final_Sigma condition: a capital sigma
+lowercases to final \(lq\[u03C2]\(rq when a cased letter precedes
+it and none follows, case-ignorable characters being skipped in
+both directions before the test, as ICU and CPython do.
+The language-conditional rows (Turkish, Azeri, Lithuanian) are not
+applied.
+Java 11 agrees with the data but not in every final-sigma context,
+because its word test counts only the categories Lu, Ll and Lt as
+cased.
+.na
+.TS
+box, tab(|);
+lB lB lB lB
+lf(CW)p-1 l lf(CW)p-1 lf(CW)p-1.
+Input|Character|Expression|Result
+_
+c4b0|\[u0130] U+0130|ulower_full(pass)|69cc87
+c39f|\[u00DF] U+00DF|uupper_full(pass)|5353
+efac81|U+FB01 (fi ligature)|uupper_full(pass)|4649
+c5bf|U+017F (long s)|uupper_full(pass)|53
+ce9fce94ce9fcea3|\[u039F]\[u0394]\[u039F]\[u03A3]|ulower_full(pass)|cebfceb4cebfcf82
+cea3|\[u03A3] alone|ulower_full(pass)|cf83
+41cea342|A\[u03A3]B|ulower_full(pass)|61cf8362
+41cea32e|A\[u03A3].|ulower_full(pass)|61cf822e
+41cea32742|A\[u03A3]\(aqB|ulower_full(pass)|61cf832762
+.TE
+.ad
+.TB "Full Case Mapping"
+.P
+In \(lqA\[u03A3]\(aqB\(rq the apostrophe is case-ignorable and is
+skipped, so the cased
+.B B
+follows the sigma and it is not final.
+.H 3 "Normalization"
+.P
+.BR nfc() ,
+.BR nfd() ,
+.B nfkc()
+and
+.B nfkd()
+are the four normalization forms of UAX #15, from the Unicode
+18.0.0 data.
+The same visible text can arrive as different code points:
+\(lq\[u00E9]\(rq is U+00E9 composed or
+.B e
+plus U+0301 decomposed, and a Hangul syllable is three bytes
+composed and six or nine decomposed.
+NFKC and NFKD also fold compatibility characters, such as
+fullwidth input and ligatures.
+Ill-formed bytes pass through unchanged and split the input into
+separately normalized runs; normalization never crosses one.
+.P
+.B nfd_hfs()
+is the decomposition an HFS+ volume applies to a file name, as
+measured on a real volume: canonical decomposition and ordering of
+combining marks only for characters assigned by Unicode 3.2,
+with supplementary characters and the ranges U+2000\(enU+2FFF and
+U+F900\(enU+FAFF left alone, and U+FFFE and U+FFFF written as the
+text
+.B %EF%BF%BE
+and
+.BR %EF%BF%BF .
+It is not
+.BR nfd() :
+no supplementary character is decomposed, and later characters
+are not either.
+HFS+ also escapes ill-formed bytes as
+.BI % XX\fR;
+.B nfd_hfs()
+does not, because it describes a name's text, and an ill-formed
+byte passes through it unchanged.
+.na
+.TS
+box, tab(|);
+lB lB lB
+lf(CW) lf(CW) lf(CW).
+Input|Expression|Result
+_
+c3a9|nfd(pass)|65cc81
+65cc81|nfc(pass)|c3a9
+ec9588|nfd(pass)|e1848be185a1e186ab
+efbca1|nfkc(pass)|41
+efac81|nfkd(pass)|6669
+e284ab|nfc(pass)|c385
+e284ab|nfd(pass)|41cc8a
+e284ab|nfd_hfs(pass)|e284ab
+c3a9|nfd_hfs(pass)|65cc81
+61cc81cca3|nfd_hfs(pass)|61cca3cc81
+f09d859e|nfd(pass)|f09d8597f09d85a5
+f09d859e|nfd_hfs(pass)|f09d859e
+e1ac86|nfd(pass)|e1ac85e1acb5
+e1ac86|nfd_hfs(pass)|e1ac86
+efbfbe|nfd_hfs(pass)|254546254246254245
+65ffcc81|nfc(pass)|65ffcc81
+65cc81ff|nfc(pass)|c3a9ff
+65cc81|convert(pass, "utf8", "cp1252", "nfc")|e9
+65cc81|utf8_to_cp1252(pass)|653f
+.TE
+.ad
+.TB "Normalization"
+.P
+U+212B (angstrom sign) keeps its code point under
+.BR nfd_hfs() ,
+U+1D15E (a supplementary musical symbol) and U+1B06 (Balinese,
+Unicode 5.0) are not decomposed, and U+FFFE becomes the nine
+characters
+.BR %EF%BF%BE .
+A stray 0xFF between
+.B e
+and U+0301 stops them composing.
+.H 2 "Text Programs"
+.P
+A text program tries a password's text across many encodings, or
+chains of encodings, and reports the readings that succeed.
+One definition serves two purposes: a search, which generates
+candidates, and a description, which names the exact conversion a
+site applied.
+Text programs run on the CPU only.
+.H 3 "Iterating over Encodings"
+.DS
+.ft CW
+for \fIv\fP in ("cp1252", "cp1251", "koi8r") { \fIbody\fP }
+for \fIv\fP in charsets("\fIgroup\fP") { \fIbody\fP }
+.ft R
+.DE
+.P
+The loop is unrolled at compile time.
+Each list item is a string literal naming a registry entry, and an
+unknown name is a compile-time error.
+Inside the body
+.I v
+is a compile-time string, and may appear only as an encoding
+operand of
+.BR convert() ,
+an encoding of
+.B valid()
+or
+.BR roundtrip() ,
+or an
+.B emit()
+label.
+Every
+.B convert()
+in the unrolled program therefore has literal operands, and the
+rules of fusion and identity (Section 4.3.5) hold for it.
+Nested loops give chains of conversions.
+Inside braces a newline is whitespace, and statements are separated
+by
+.BR ; .
+.P
+.B charsets()
+names one of eight groups:
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lw(4.8i).
+Group|Members
+_
+all|T{
+Every charset except \f(CWlowbyte16\fP, which is encode only, and the aliases \f(CWgbk\fP and \f(CWbig5\fP
+T}
+windows|T{
+The ANSI pages: cp874, cp932, cp936, cp949, cp950, cp1250\(encp1258
+T}
+oem|T{
+The 16 OEM pages, cp708 and cp720
+T}
+iso8859|T{
+latin1 and the \f(CWiso8859_\fIN\fR tables
+T}
+mac|T{
+cp10000 and the 11 \f(CWmac_*\fP tables
+T}
+ebcdic|T{
+cp37, cp500, cp875, cp1026, cp1047, cp1140\(encp1149
+T}
+cjk|T{
+Chinese, Japanese and Korean (CJK): cp932, cp936, cp949, cp950, cp1361, jis_x0201, cp10001, cp10002, cp10003, cp10008, shift_jis, euc_jp, iso2022jp, euc_kr, gb2312, gb18030, the seven \f(CW_web\fP charsets, euc_jp_c1, euc_kr_c1
+T}
+unicode|T{
+utf8, utf16le, utf16be, utf16, utf32le, utf32be, utf32, cesu8, utf7
+T}
+.TE
+.ad
+.TB "charsets() Groups"
+.P
+Windows' readings of other standards (the KOI8 pages,
+cp28591\(encp28605, the cp100\fINN\fP pages outside
+.BR mac ),
+cp20127, the published single-byte tables that no other group
+holds (\f(CWkoi8r\fP and \f(CWkoi8u\fP among them),
+.B gsm0338
+and
+.B t61
+are in
+.B all
+only.
+A group gains members as encodings are added to the registry, so a
+group is a search convenience, not a fixed list.
+.H 3 "Success and Failure"
+.P
+A failed conversion is null (Section 4.3.4): a
+.B null
+or
+.B fail
+policy, or a decoder meeting ill-formed input.
+.B "if \fIt\fP { }"
+is true when
+.I t
+is not empty, which is all a search needs to skip impossible
+readings.
+Two predicates return
+.B \(dq1\(dq
+or the empty string:
+.BL
+.LI
+.BI valid( x ,\  cs )
+is true when
+.I x
+is well-formed in
+.I cs
+and nothing in it is unmappable.
+For a
+.BI cp NNN
+charset it is true exactly when the strict Windows decode succeeds.
+.LI
+.BI roundtrip( x ,\  a ,\  b )
+is true when
+.BI convert(convert( x ,\  a ,\  b ),\  b ,\  a )
+gives back
+.IR x .
+.LE
+.P
+Both predicates are the empty string when
+.I x
+is empty:
+.B valid(\(dq\(dq,\ \fIcs\fP)
+and
+.B roundtrip(\(dq\(dq,\ \fIa\fP,\ \fIb\fP)
+are false, because the empty string is also the null result of a
+failed conversion and a search must not report it as a reading.
+.P
+A decode into
+.B utf8
+cannot meet an unmappable character, and neither can a decode from
+a code page or a table that defines every byte into any Unicode
+charset, so
+.B fail
+there is a compile-time error (Section 4.3.3); a search that
+decodes in every encoding tests
+.B valid()
+instead.
+.H 3 "Reporting"
+.P
+.BI emit( x )
+writes
+.I x
+as it always does.
+.BI emit( x ,\  label ,\ ...)
+writes the labels and then the value, separated by tabs, and writes
+the value as
+.B $HEX[...]
+when it is not printable ASCII, as mdxfind, hashpipe and encforce
+do.
+An empty label writes nothing, not even its tab:
+.B emit(\fIx\fP,\ \(dq\(dq)
+writes only the value, as
+.B $HEX[...]
+when it is not printable ASCII, which
+.BI emit( x )
+does not.
+A label is a string literal or a loop variable; anything else is a
+compile-time error:
+.DS
+.ft CW
+emit(): label 1 must be a string literal or a loop variable
+\&'cs' is a loop over encoding names; it can be used only as a
+    convert(), valid() or roundtrip() encoding, or as an emit() label
+charsets(): unknown group 'x' (all, windows, oem, iso8859, mac,
+    ebcdic, cjk, unicode)
+.ft R
+.DE
+.H 3 "Text Programs as Hash Types"
+.P
+A text program can be a user-defined hash type in mdxfind and
+hashpipe (Section 7.3).
+Each emitted value is one candidate digest for the same password,
+and the type is compared at
+.B x01
+only, because several candidates have no single next round.
+A hash definition must not change meaning, and a
+.B charsets()
+group can gain members, so a userdef stanza names its encodings in
+an explicit list;
+.B charsets()
+in a stanza is a compile-time error, reported with the stanza, file
+and line before the run is refused:
+.DS
+.ft CW
+.ps 9
+[TXTLIST]
+id = 9002
+hx = for cs in ("cp1252", "cp437") { emit(md5(convert(pass, "utf8", cs, "fail")), cs) }
+.ps
+.ft R
+.DE
+.P
+With the MD5 of \(lq\[u00E9]\(rq encoded in CP437 as the target,
+mdxfind reports
+.BR "1 USER_TXTLISTx01 hashes found" .
+.H 3 "Examples"
+.P
+Read the bytes in every encoding of a group and keep the readings
+that are valid, as
+.B "encforce \-m decode"
+does:
+.DS
+.ft CW
+for cs in charsets("cjk") {
+    if valid(pass, cs) { emit(convert(pass, cs, "utf8"), cs) }
+}
+.ft R
+.DE
+.P
+The input 82a0 (U+3042, hiragana a, in Shift_JIS) gives:
+.DS
+.ft CW
+cp932	$HEX[e38182]
+cp936	$HEX[e58181]
+cp949	$HEX[eab687]
+cp10001	$HEX[e38182]
+shift_jis	$HEX[e38182]
+gb18030	$HEX[e58181]
+shift_jis_web	$HEX[e38182]
+euc_kr_web	$HEX[eab687]
+gb18030_web	$HEX[e58181]
+gbk_web	$HEX[e58181]
+.ft R
+.DE
+.P
+Over
+.B charsets(\(dqall\(dq)
+the same input has 111 valid readings.
+.P
+Undo one round of mojibake.
+The password was UTF-8, read as code page
+.IR a ,
+and saved as UTF-8 again: encode it back into
+.I a
+to recover the original bytes, and keep the result if it is valid
+UTF-8.
+.DS
+.ft CW
+for a in charsets("windows") {
+    t = convert(pass, "utf8", a, "fail");
+    if valid(t, "utf8") { emit(t, a) }
+}
+.ft R
+.DE
+.P
+The input c383c2a9 (\(lq\[u00C3]\[u00A9]\(rq, the UTF-8 of
+\(lq\[u00E9]\(rq read as CP1252) gives:
+.DS
+.ft CW
+cp1252	$HEX[c3a9]
+cp1254	$HEX[c3a9]
+.ft R
+.DE
+.P
+Two nested loops try each pair of code pages:
+.DS
+.ft CW
+for a in ("cp1252", "cp1251") {
+    for b in ("cp437", "cp850") {
+        t = convert(convert(pass, "utf8", a, "fail"), b, "utf8");
+        if t { emit(t, a, b) }
+    }
+}
+.ft R
+.DE
+.P
+The input c3a9 (\(lq\[u00E9]\(rq) gives the following;
+\(lq\[u00E9]\(rq is not in CP1251, so neither
+.B cp1251
+pair is written:
+.DS
+.ft CW
+cp1252	cp437	$HEX[ce98]
+cp1252	cp850	$HEX[c39a]
+.ft R
+.DE
+.P
+A hash type that names a site's actual conversion: a password typed
+on a CP437 console, stored by a CP1252 program, and hashed as UTF-8.
+.DS
+.ft CW
+md5(convert(convert(pass, "utf8", "cp437", "fail"), "cp1252", "utf8"))
+.ft R
+.DE
+.P
+For the input c3a9 (\(lq\[u00E9]\(rq, CP437 0x82, which CP1252 reads
+as \(lq\[u201A]\(rq) the result is
+.BR 58ba7118937e09003b1fa2505001f270 ,
+the MD5 of e2809a.
+.P
+hashpipe runs an expression on every line of its input, so with
+.B emit()
+and an empty label (Section 4.7.3) it converts a whole list.
+Each input line gives exactly one output line, which holds the
+value alone and is written as
+.B $HEX[...]
+when it is not printable ASCII.
+An input line may itself be
+.BR $HEX[...] ,
+so any byte string can be converted.
+This converts a list from UTF-8 to CP1252:
+.DS
+.ft CW
+hashpipe \-X 'emit(convert(pass, "utf8", "cp1252", "fail"), "")'
+.ft R
+.DE
+.na
+.TS
+box, tab(|);
+lB lB
+lf(CW) lf(CW).
+Input line|Output line
+_
+abc|abc
+$HEX[c3a9]|$HEX[e9]
+$HEX[e282ac]|$HEX[80]
+$HEX[d0b0]|\fI(empty)\fP
+.TE
+.ad
+.TB "A List Converted from UTF-8 to CP1252"
+.P
+CP1252 has no U+0430 (Cyrillic small a), so that conversion
+fails, and its line is empty.
+A failed conversion is always an empty line and never a marker: the
+output is data that the next program reads, and an empty line keeps
+each output line opposite its input line.
+To find the failures, compare the output with the input by line
+number.
+.P
+The output can be read again, so the stages of a conversion can be
+chained.
+This reproduces the site of the previous example, text typed on a
+CP437 console and stored by a CP1252 program, and hashes the
+result:
+.DS
+.ft CW
+hashpipe \-X 'emit(convert(pass, "utf8", "cp437", "fail"), "")' |
+  hashpipe \-X 'emit(convert(pass, "cp1252", "utf8"), "")' |
+  hashpipe \-X 'emit(md5(pass), "")'
+.ft R
+.DE
+.P
+For the four input lines above it writes four lines:
+900150983cd24fb0d6963f7d28e17f72, the MD5 of \(lqabc\(rq;
+58ba7118937e09003b1fa2505001f270, the MD5 of e2809a, as before;
+and d41d8cd98f00b204e9800998ecf8427e twice.
+\(lq\[u20AC]\(rq and U+0430 are not in CP437, so the first stage
+writes an empty line for each, and the last stage hashes those empty
+lines as the empty password, whose MD5 that is.
+This is the null result of Section 4.3.4, carried through the
+pipeline.
+.P
+hashpipe removes the line terminator, a final CR included, from
+each input line; a value that ends in CR must be given as
+.BR $HEX[...] .
+.H 2 "Conformance"
+.P
+Every table behind a conversion is generated at build time from
+its named source and is never typed by hand or checked into
+revision control.
+The oracles live in the
+.B hx-support
+directory of the source tree:
+.na
+.TS H
+box, tab(|);
+lB lB
+lw(2.1i)f(CW) lw(3.8i).
+Oracle|What it establishes
+_
+.TH
+hxref.py|T{
+The character model, \fBulength\fP, \fBucut\fP, case mapping and UTF-16 decoding vectors
+T}
+cpref.py|T{
+Code-page vectors from Microsoft's WindowsBestFit tables, Latin-1 and KOI8
+T}
+T{
+review/winvec.py
+.br
+review/verify.py
+T}|T{
+An independent second derivation of the same vectors, written without reference to the first, from Microsoft's tables and Wine's reimplementation of the Windows rules
+T}
+T{
+review/compare_ms.py
+.br
+review/compare_windump.py
+T}|T{
+The unicode.org tables, Microsoft's published code-page files and the Windows 11 dumps, compared with one another
+T}
+review/windows/|T{
+The Windows 11 measurement scripts and their output (Section 4.5.7)
+T}
+phase1/|T{
+The golden corpus (all 256 single bytes, all 65,536 byte pairs and the specification's inputs), and the recorded output of every named conversion on it
+T}
+phase2/|T{
+\fBp2check\fP: every table against its source, exhaustively; \fBconform\fP: the conformance vectors, identities and compile-time checks
+T}
+phase3/|T{
+\fBnormtest\fP: the normalization forms against NormalizationTest.txt 18.0.0; \fBhfs/\fP: \fBnfd_hfs\fP against names read back from an HFS+ volume; \fBcase/\fP: full case mapping against Node (ICU) and Java dumps; \fBfusecheck\fP: every fused program against its unfused form; \fBconform\fP: the phase-3 vectors
+T}
+review/windows/cpdump2/|T{
+The dumps of 39 further pages, and the OEM glyph dumps (\fBMB_USEGLYPHCHARS\fP)
+T}
+review/windows/cpdump3/|T{
+The strict decode (\fBMB_ERR_INVALID_CHARS\fP) of all 78 pages
+T}
+phase4a/|T{
+\fBconform.py\fP: text programs
+T}
+phase4b/fetch/|T{
+The standards' tables, each with its URL and SHA-256 in \fBMANIFEST.tsv\fP
+T}
+phase4b/measure/|T{
+The sourcing study: what encforce and the other implementations read, against the standards
+T}
+phase4b/conform/|T{
+\fBp4check\fP: every page against the three Windows dumps and the glyph dump, and every published single-byte table except \f(CWlatin1\fP and KOI8 against the sourcing study's readings; \fBp4oracle.py\fP: those readings; \fBvs_encforce.py\fP: hx against encforce; \fBvs_cjk.py\fP: the CJK readings; \fBchrome_td.js\fP: Chrome's TextDecoder; \fBvs_step4.py\fP: the Unicode forms, GSM 03.38 and T.61
+T}
+.TE
+.ad
+.TB "Conformance Oracles"
+.P
+None of these checks has a failure unless it says otherwise.
+Each of the 78 code pages matches the three Windows dumps: 250,743
+byte and pair inputs, each decoded leniently, strictly and through
+.BR valid() ;
+905 lead bytes at the end of the input; and 4,952,064 encodes,
+each strict and best fit.
+The glyph readings match on 4,352 decodes over 17 pages.
+Every byte of the 37 published single-byte tables other than
+.B latin1
+and KOI8, under five
+policies, and every Unicode scalar value (1,112,064), encoded two
+ways, match the sourcing study's readings.
+The CJK readings match the study's readings in both directions,
+glibc's 245,041 GB 18030 entries, GB 18030's one code per scalar
+value, and ISO-2022-JP round trips over every scalar value;
+.B euc_jp_c1
+and
+.B euc_kr_c1
+match glibc and IBM.
+Chrome 157's TextDecoder agrees on all 1,998,254 Shift_JIS,
+EUC-JP, EUC-KR, GBK, GB18030 and Big5 inputs, except Big5's four
+two-code-point pointers, where Chrome departs from the Encoding
+Standard; on 150,000 ISO-2022-JP strings it differs only where the
+Standard restores bytes to its input, which Chrome does not.
+The six Unicode forms match Python's codecs and UTR #26 over every
+scalar value, and UTF-7 matches the examples of RFC 2152.
+The text-program suite passes 4,307,000 rows.
+.P
+The check also covers 126,976 Windows
+case mappings, the
+.B upper_oem
+table of the sixteen OEM pages (1,015,808 code points), the
+Unicode 18.0.0 simple case mapping of every scalar value
+(2,224,128 mappings) and 127,488 KOI8 decodes and encodes, with no
+failures.
+Normalization passes all 4,783,060 checks derived from
+NormalizationTest.txt 18.0.0, including every code point the test
+file does not list.
+.B nfd_hfs()
+equals the HFS+ volume on 192,993 single-character names and
+78,864 pairs of combining marks.
+The full case mapping differs from Node's ICU only where a
+character is newer than ICU's Unicode version or changed its
+properties since, with no unexplained difference.
+.P
+A new encoding is admitted only when
+.BL
+.LI
+its table is generated from a named source: the Windows dump for
+a Windows page, or the standard that defines it;
+.LI
+the generated table matches that source exhaustively, and matches
+Windows or the standard on every vector computed by an independent
+oracle;
+.LI
+on a single-byte page, the round trip
+.B utf8_to_cp\fINNN\fP(cp\fINNN\fP_to_utf8(\fIb\fP))
+gives back
+.I b
+for every byte, or the page's exceptions are listed.
+The exceptions in Section 4.2.1 are four pages: cp875 at 0xDC, 0xE1,
+0xEC, 0xED, 0xFC and 0xFD, which decode to SUB and encode back as
+0x3F; cp10005 at 0xCB, whose character encodes as 0xDE; cp10021 at
+29 bytes, among them 0x7F, which decodes to NUL; and cp20127 at its
+128 high bytes, which Windows decodes with the high bit cleared.
+The round trip is tested for each page, never assumed;
+.LI
+where encforce knows the encoding, hx and encforce agree on every
+byte and code point, or the difference is one where encforce
+departs from the standard, as the sourcing study lists;
+.LI
+it adds a new name.
+An existing name never changes meaning.
+.LE
 .H 1 "Iteration and Control Flow"
 .PF "'Iteration and Control Flow' \\\\nP'Waffle'"
 .P
@@ -2161,6 +5506,21 @@ hex(h)
 .ft R
 .DE
 .P
+The second form iterates over encodings:
+.DS
+.ft CW
+for \fIvar\fP in ("cp1252", "cp1251") { \fIbody\fP }
+for \fIvar\fP in charsets("windows") { \fIbody\fP }
+.ft R
+.DE
+.P
+The list holds string literals naming registry entries, or one
+.B charsets()
+group.
+The loop is unrolled at compile time, and the variable is a
+compile-time string that may be used only as an encoding name
+(Section 4.7.1).
+.P
 This cannot be expressed with the
 .B ^
 operator because the loop body is not simply
@@ -2187,7 +5547,7 @@ converts the last binary digest to hex for output.
 The
 .B if
 statement executes a block conditionally based on the
-result of a relational expression.
+result of a relational expression, or on a single value.
 .DS
 .ft CW
 if \fIexpr\fP \fIrelop\fP \fIexpr\fP {
@@ -2201,7 +5561,7 @@ if \fIexpr\fP \fIrelop\fP \fIexpr\fP {
 The
 .B else
 clause is optional.
-The condition is a single relational test, not a chain
+The condition is a single relational test or a single value, not a chain
 of Boolean expressions; there are no
 .B and ,
 .B or ,
@@ -2215,6 +5575,32 @@ The supported relops are
 .BR > ,
 .BR <= ,
 .BR >= .
+.P
+A condition that is a single value is true when the value is not
+empty:
+.DS
+.ft CW
+t = convert(pass, "utf8", "cp1252", "fail")
+if t { emit(t) } else { emit("not in CP1252") }
+.ft R
+.DE
+.P
+With the password \(lq\[u20AC]\(rq this writes
+.B 80
+(CP1252 0x80, written in hex because it is not printable ASCII);
+with U+0434 (Cyrillic de) it writes
+.BR "not in CP1252" .
+A failed conversion is null (Section 4.3.4), and
+.B valid()
+and
+.B roundtrip()
+return
+.B \(dq1\(dq
+or the empty string, so they serve directly as conditions
+(Section 4.7.2).
+An integer is never empty:
+.B "if sub(1, 1) { }"
+takes the then-block.
 .P
 Comparison semantics are strict-typed:
 integer\(emversus\(eminteger compares signed magnitudes,
@@ -2884,7 +6270,7 @@ is the catalog compiler.
 It parses
 .BR hx (8),
 validates every expression against the grammar of
-Section 2.2 and the function registry of Section 3,
+Section 2.3 and the function registry of Section 3,
 and emits a C source file containing the bytecode,
 the variable slot map, the string constant table, and
 the metadata for each entry.
@@ -2954,7 +6340,7 @@ The
 .B \-d
 and
 .B \-b
-flags described in Section 7 dump the AST and the
+flags described in Section 9 dump the AST and the
 compiled bytecode respectively, exposing the internal
 representation for inspection.
 .PF "'Summary' \\\\nP'Waffle'"
