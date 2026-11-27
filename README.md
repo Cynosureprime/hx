@@ -22,7 +22,7 @@ expression, and `hashpipe -X 'expr' -D` disassembles it.
 | File | |
 |---|---|
 | `hx.1` | The specification proper — language, grammar, primitives, opcodes, the virtual machine. Carries the `$Revision$` that identifies the document. |
-| `hx.8` | **Appendix A**, the mdxfind type to hx expression reference: one row per registered type, giving its index, its name and the expression it computes. |
+| `hx.8` | The three appendices. **Appendix A**, the mdxfind type to hx expression reference: one row per registered type, giving its index, its name and the expression it computes. **Appendix B**, the intrinsic function reference: every built-in function, with its default output form and an example. **Appendix C**, the encoding, token and group names: every charset, transfer encoding and alias that `convert()` accepts, every `convert()` token, and every `charsets()` group. |
 | `hx.9` | Title page and table of contents. |
 | `Makefile` | How the PDF is built. |
 
